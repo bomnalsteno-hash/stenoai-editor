@@ -11,6 +11,7 @@ export const Editor: React.FC<EditorProps> = () => {
   const [copied, setCopied] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<boolean>(false);
+  const [inputFileName, setInputFileName] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -20,10 +21,10 @@ export const Editor: React.FC<EditorProps> = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `stenoai-교정본-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').slice(0, 12)}.txt`;
+    a.download = inputFileName ?? `stenoai-교정본-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').slice(0, 12)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [outputText]);
+  }, [outputText, inputFileName]);
 
   const handleFileDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -36,6 +37,7 @@ export const Editor: React.FC<EditorProps> = () => {
       return;
     }
     setError(null);
+    setInputFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => setInputText(String(reader.result ?? ''));
     reader.readAsText(file, 'UTF-8');
@@ -82,6 +84,7 @@ export const Editor: React.FC<EditorProps> = () => {
       setInputText('');
       setOutputText('');
       setError(null);
+      setInputFileName(null);
     }
   }, []);
 
