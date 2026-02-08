@@ -1,69 +1,55 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# StenoAI Editor
 
-# Run and deploy your AI Studio app
+전문가용 속기 교정 어시스턴트. 로그인한 사용자만 사용 가능하며, 관리자 페이지에서 아이디별 토큰 사용량을 조회할 수 있습니다.
 
-This contains everything you need to run your app locally.
+## 기능
 
-View your app in AI Studio: https://ai.studio/apps/drive/1ZxWe5TwT9JJLHOEgql5twmsqkpBFSFZo
+- **로그인/회원가입** (Supabase Auth)
+- **STT 초안** 입력·TXT 드래그 앤 드롭 → **AI 교정** → **교정본 다운로드** (같은 파일명)
+- **관리자 전용 페이지** (`/admin`): 아이디(이메일)별 토큰 사용량·마지막 사용 시각·요청 횟수 조회
 
-## Run Locally
+## 로컬 실행
 
-**Prerequisites:**  Node.js
+**필요:** Node.js, Supabase 프로젝트
 
+1. 의존성 설치: `npm install`
+2. Supabase 프로젝트 생성 후 [supabase/schema.sql](supabase/schema.sql) 를 SQL Editor에서 실행
+3. `.env.local` 생성 ( [.env.example](.env.example) 참고 )
+   - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (Supabase 대시보드 → Settings → API)
+   - `VITE_APP_URL` 은 로컬에서는 비워두거나 `http://localhost:3000`
+4. 개발 서버: `npm run dev`
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+로컬에서는 API가 없으므로 **교정 기능**을 쓰려면 Vercel에 배포한 뒤, `VITE_APP_URL` 에 배포 URL을 넣고 다시 빌드하거나, 같은 프로젝트를 Vercel에서 실행해야 합니다.
 
-## GitHub에 올리기
+## 배포 (Vercel)
 
-1. **GitHub에서 새 저장소 생성**
-   - [github.com/new](https://github.com/new) 에서 저장소 생성 (예: `stenoai-editor`)
-   - "Add a README file" 등은 체크하지 않고 **Create repository**만 누릅니다.
+1. **Supabase**
+   - [supabase.com](https://supabase.com) 에서 프로젝트 생성
+   - SQL Editor에서 [supabase/schema.sql](supabase/schema.sql) 실행
+   - Settings → API 에서 **URL**, **anon key**, **service_role key** 복사
 
-2. **프로젝트 폴더에서 Git 초기화 및 푸시**
-   ```bash
-   cd "c:\Users\sieun\Downloads\개발\StenoAI Editor"
+2. **관리자 지정**
+   - Supabase 대시보드 → Table Editor → `profiles` → 관리자로 쓸 이메일의 `role` 을 `admin` 으로 변경  
+   - 또는 SQL: `update public.profiles set role = 'admin' where email = 'your@email.com';`
 
-   git init
-   git add .
-   git commit -m "Initial commit: StenoAI Editor"
+3. **Vercel**
+   - [vercel.com/new](https://vercel.com/new) → GitHub 저장소 Import
+   - **Environment Variables** 추가:
+     - `GEMINI_API_KEY` (Gemini API 키)
+     - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (Supabase)
+   - 배포 후, **한 번 더** 환경 변수에 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` 추가 (클라이언트용)
+   - **Redeploy** 후 배포 URL 확인
 
-   git branch -M main
-   git remote add origin https://github.com/내아이디/저장소이름.git
-   git push -u origin main
-   ```
-   `내아이디/저장소이름`을 본인 GitHub 사용자명과 방금 만든 저장소 이름으로 바꾸세요.
+4. **배포 URL을 클라이언트에 반영 (선택)**
+   - Vercel에서 배포 URL이 `https://xxx.vercel.app` 이면, 같은 도메인에서 API를 쓰므로 `VITE_APP_URL` 은 비워두면 됨.
+   - 다른 도메인에서 API를 호출할 경우에만 `VITE_APP_URL` 에 API 기준 URL 설정
 
-3. **이후 수정사항 올리기**
-   ```bash
-   git add .
-   git commit -m "변경 내용 요약"
-   git push
-   ```
+## GitHub 푸시
 
-## 웹 앱 배포 (Vercel)
+```bash
+git add .
+git commit -m "메시지"
+git push
+```
 
-1. **Vercel 로그인** (최초 1회)
-   ```bash
-   npx vercel login
-   ```
-   브라우저에서 로그인 후 이메일 인증을 완료하세요.
-
-2. **GitHub 연동으로 배포 (권장)**
-   - [vercel.com/new](https://vercel.com/new) → **Import Git Repository**
-   - 방금 올린 GitHub 저장소 선택 → **Import**
-   - **Environment Variables**에 `GEMINI_API_KEY` 추가 후 **Deploy**
-
-   이후 `main` 브랜치에 `git push`할 때마다 자동으로 배포됩니다.
-
-3. **CLI로 한 번만 배포**
-   ```bash
-   cd "c:\Users\sieun\Downloads\개발\StenoAI Editor"
-   npx vercel
-   ```
-   배포 후 [Vercel 대시보드](https://vercel.com/dashboard) → 해당 프로젝트 → **Settings** → **Environment Variables**에서 `GEMINI_API_KEY`를 넣고 **Redeploy** 하세요.
+Vercel과 GitHub를 연동해 두면 `main` 브랜치 푸시 시 자동 배포됩니다.

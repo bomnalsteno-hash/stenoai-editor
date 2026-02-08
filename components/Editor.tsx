@@ -1,10 +1,12 @@
 import React, { useState, useCallback, useRef } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { correctTranscript } from '../services/geminiService';
 import { ArrowRight, Copy, Sparkles, CheckCheck, FileText, Eraser, Download, Upload } from 'lucide-react';
 
 interface EditorProps {}
 
 export const Editor: React.FC<EditorProps> = () => {
+  const { session } = useAuth();
   const [inputText, setInputText] = useState<string>('');
   const [outputText, setOutputText] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -63,14 +65,15 @@ export const Editor: React.FC<EditorProps> = () => {
     setOutputText(''); // Clear previous output to show loading state effectively
 
     try {
-      const result = await correctTranscript(inputText);
+      if (!session?.access_token) throw new Error('로그인이 필요합니다.');
+      const result = await correctTranscript(inputText, session.access_token);
       setOutputText(result);
     } catch (err: any) {
       setError(err.message || "교정 중 오류가 발생했습니다. 다시 시도해주세요.");
     } finally {
       setIsProcessing(false);
     }
-  }, [inputText]);
+  }, [inputText, session?.access_token]);
 
   const handleCopy = useCallback(() => {
     if (!outputText) return;
