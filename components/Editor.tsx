@@ -3,32 +3,30 @@ import { useAuth } from '../context/AuthContext';
 import { correctTranscript } from '../services/geminiService';
 import { ArrowRight, Copy, Sparkles, CheckCheck, FileText, Eraser, Download, Upload } from 'lucide-react';
 
-/** 문단 구분: 빈 줄(\n\n) 기준. 빈 줄이 없으면 한 줄씩(\n) 기준 */
-function splitParagraphs(text: string): string[] {
-  if (!text.trim()) return [];
-  const byDouble = text.split(/\n\n+/).map((s) => s.trim()).filter(Boolean);
-  if (byDouble.length > 1) return byDouble;
-  return text.split(/\n/).map((s) => s.trim()).filter(Boolean);
+/** 줄 단위 분리 (\n 기준). 빈 줄도 한 줄로 유지 */
+function splitLines(text: string): string[] {
+  if (!text) return [];
+  const raw = text.replace(/\r\n/g, '\n');
+  const lines = raw.split(/\n/);
+  return lines.length ? lines : [];
 }
 
-/** 각 문단의 start/end 문자 위치 (textarea selection용). splitParagraphs와 같은 경계 사용 */
-function getParagraphRanges(text: string): { start: number; end: number }[] {
-  if (!text.trim()) return [];
+/** 각 줄의 start/end 문자 위치 (textarea selection용) */
+function getLineRanges(text: string): { start: number; end: number }[] {
+  if (!text) return [];
   const raw = text.replace(/\r\n/g, '\n');
-  const hasDouble = /\n\n+/.test(raw);
-  const sep = hasDouble ? /\n\n+/ : /\n/;
   const boundaries: number[] = [0];
-  let match: RegExpExecArray | null;
-  const re = new RegExp(sep.source, 'g');
-  while ((match = re.exec(raw)) !== null) {
-    boundaries.push(match.index + match[0].length);
+  let i = 0;
+  while (i < raw.length) {
+    const next = raw.indexOf('\n', i);
+    if (next === -1) break;
+    boundaries.push(next + 1);
+    i = next + 1;
   }
   boundaries.push(raw.length);
   const ranges: { start: number; end: number }[] = [];
-  for (let i = 0; i < boundaries.length - 1; i++) {
-    const start = boundaries[i];
-    const end = boundaries[i + 1];
-    if (raw.slice(start, end).trim()) ranges.push({ start, end });
+  for (let j = 0; j < boundaries.length - 1; j++) {
+    ranges.push({ start: boundaries[j], end: boundaries[j + 1] });
   }
   return ranges.length ? ranges : [{ start: 0, end: raw.length }];
 }
@@ -44,17 +42,17 @@ export const Editor: React.FC<EditorProps> = () => {
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<boolean>(false);
   const [inputFileName, setInputFileName] = useState<string | null>(null);
-  const [selectedParagraphIndex, setSelectedParagraphIndex] = useState<number | null>(null);
+  const [selectedLineIndex, setSelectedLineIndex] = useState<number | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
   inputFileNameRef.current = inputFileName;
   const outputPanelRef = useRef<HTMLDivElement>(null);
-  const outputParagraphRefs = useRef<(HTMLParagraphElement | null)[]>([]);
+  const outputLineRefs = useRef<(HTMLParagraphElement | null)[]>([]);
 
-  const inputRanges = useMemo(() => getParagraphRanges(inputText), [inputText]);
-  const inputParagraphs = useMemo(() => splitParagraphs(inputText), [inputText]);
-  const outputParagraphs = useMemo(() => splitParagraphs(outputText), [outputText]);
+  const inputRanges = useMemo(() => getLineRanges(inputText), [inputText]);
+  const inputLines = useMemo(() => splitLines(inputText), [inputText]);
+  const outputLines = useMemo(() => splitLines(outputText), [outputText]);
 
   const handleDownload = useCallback(() => {
     if (!outputText) return;
@@ -78,6 +76,7 @@ export const Editor: React.FC<EditorProps> = () => {
       return;
     }
     setError(null);
+    inputFileNameRef.current = file.name;
     setInputFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => setInputText(String(reader.result ?? ''));
@@ -101,7 +100,7 @@ export const Editor: React.FC<EditorProps> = () => {
 
     setIsProcessing(true);
     setError(null);
-    setSelectedParagraphIndex(null);
+    setSelectedLineIndex(null);
     setOutputText(''); // Clear previous output to show loading state effectively
 
     try {
@@ -129,28 +128,39 @@ export const Editor: React.FC<EditorProps> = () => {
       setOutputText('');
       setError(null);
       setInputFileName(null);
-      setSelectedParagraphIndex(null);
+      setSelectedLineIndex(null);
     }
   }, []);
 
   const onInputClickForSync = useCallback(() => {
     const ta = textareaRef.current;
-    if (!ta || !outputParagraphs.length) return;
+    if (!ta || !outputLines.length) return;
     const cursor = ta.selectionStart;
-    const idx = inputRanges.findIndex((r) => cursor >= r.start && cursor <= r.end);
+    const idx = inputRanges.findIndex((r) => cursor >= r.start && cursor < r.end);
+    if (idx === -1 && inputRanges.length) {
+      const last = inputRanges[inputRanges.length - 1];
+      if (cursor >= last.start && cursor <= last.end) {
+        setSelectedLineIndex(inputRanges.length - 1);
+        ta.setSelectionRange(last.start, last.end);
+        ta.focus();
+        outputLineRefs.current[Math.min(inputRanges.length - 1, outputLines.length - 1)]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        return;
+      }
+      return;
+    }
     if (idx === -1) return;
-    setSelectedParagraphIndex(idx);
+    setSelectedLineIndex(idx);
     const r = inputRanges[idx];
     ta.setSelectionRange(r.start, r.end);
     ta.focus();
     requestAnimationFrame(() => {
-      outputParagraphRefs.current[idx]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      outputLineRefs.current[idx]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
-  }, [outputParagraphs.length, inputRanges]);
+  }, [outputLines.length, inputRanges]);
 
-  const onOutputParagraphClick = useCallback(
+  const onOutputLineClick = useCallback(
     (index: number) => {
-      setSelectedParagraphIndex(index);
+      setSelectedLineIndex(index);
       const ta = textareaRef.current;
       if (ta && inputRanges.length > 0) {
         const safeIdx = Math.min(index, inputRanges.length - 1);
@@ -234,6 +244,7 @@ export const Editor: React.FC<EditorProps> = () => {
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               onClick={outputText ? onInputClickForSync : undefined}
+              onMouseUp={outputText ? onInputClickForSync : undefined}
               placeholder="여기에 음성 인식(STT) 초안 텍스트를 붙여넣거나, TXT 파일을 드래그 앤 드롭하세요..."
               className="w-full h-full p-6 resize-none focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500/10 bg-white text-slate-700 leading-relaxed text-base font-sans rounded-lg"
               spellCheck={false}
@@ -291,20 +302,20 @@ export const Editor: React.FC<EditorProps> = () => {
             ) : null}
 
             {outputText ? (
-              <div className="p-6 space-y-4">
-                {outputParagraphs.map((para, i) => (
+              <div className="p-6 space-y-0.5">
+                {outputLines.map((line, i) => (
                   <p
                     key={i}
                     ref={(el) => {
-                      outputParagraphRefs.current[i] = el;
+                      outputLineRefs.current[i] = el;
                     }}
-                    onClick={() => onOutputParagraphClick(i)}
+                    onClick={() => onOutputLineClick(i)}
                     className={`
-                      leading-relaxed text-base font-sans text-slate-800 cursor-pointer rounded-md py-1 px-2 -mx-2 transition-colors
-                      ${selectedParagraphIndex === i ? 'bg-amber-200/80 ring-1 ring-amber-400/60' : 'hover:bg-indigo-100/60'}
+                      leading-relaxed text-base font-sans text-slate-800 cursor-pointer rounded py-0.5 px-2 -mx-2 transition-colors whitespace-pre-wrap
+                      ${selectedLineIndex === i ? 'bg-amber-200/80 ring-1 ring-amber-400/60' : 'hover:bg-indigo-100/60'}
                     `}
                   >
-                    {para}
+                    {line || '\u00A0'}
                   </p>
                 ))}
               </div>

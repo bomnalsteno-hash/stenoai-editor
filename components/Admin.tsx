@@ -12,6 +12,7 @@ function estimateCostUsd(inputTokens: number, outputTokens: number): number {
 }
 
 type ViewMode = 'total' | 'daily' | 'monthly';
+type AggregateBy = 'all' | 'user';
 type CostCurrency = 'USD' | 'KRW';
 
 type LogDetail = {
@@ -39,6 +40,7 @@ export function Admin() {
   const [error, setError] = useState<string | null>(null);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('total');
+  const [aggregateBy, setAggregateBy] = useState<AggregateBy>('all');
   const [costCurrency, setCostCurrency] = useState<CostCurrency>('USD');
   const [krwPerUsd, setKrwPerUsd] = useState<number | null>(null);
 
@@ -133,6 +135,72 @@ export function Admin() {
       .sort((a, b) => b.month.localeCompare(a.month));
   }, [usage]);
 
+  const dailyRowsByUser = useMemo(() => {
+    const byKey = new Map<
+      string,
+      { date: string; user_id: string; email: string | null; request_count: number; total_input: number; total_output: number }
+    >();
+    for (const row of usage) {
+      for (const d of row.details) {
+        if (!d.created_at) continue;
+        const date = new Date(d.created_at).toISOString().slice(0, 10);
+        const key = `${date}_${row.user_id}`;
+        const cur = byKey.get(key) ?? {
+          date,
+          user_id: row.user_id,
+          email: row.email,
+          request_count: 0,
+          total_input: 0,
+          total_output: 0,
+        };
+        cur.request_count += 1;
+        cur.total_input += d.tokens_input ?? 0;
+        cur.total_output += d.tokens_output ?? 0;
+        byKey.set(key, cur);
+      }
+    }
+    return Array.from(byKey.values())
+      .map((v) => ({
+        ...v,
+        total_tokens: v.total_input + v.total_output,
+        costUsd: estimateCostUsd(v.total_input, v.total_output),
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date) || (a.email ?? a.user_id).localeCompare(b.email ?? b.user_id));
+  }, [usage]);
+
+  const monthlyRowsByUser = useMemo(() => {
+    const byKey = new Map<
+      string,
+      { month: string; user_id: string; email: string | null; request_count: number; total_input: number; total_output: number }
+    >();
+    for (const row of usage) {
+      for (const d of row.details) {
+        if (!d.created_at) continue;
+        const month = new Date(d.created_at).toISOString().slice(0, 7);
+        const key = `${month}_${row.user_id}`;
+        const cur = byKey.get(key) ?? {
+          month,
+          user_id: row.user_id,
+          email: row.email,
+          request_count: 0,
+          total_input: 0,
+          total_output: 0,
+        };
+        cur.request_count += 1;
+        cur.total_input += d.tokens_input ?? 0;
+        cur.total_output += d.tokens_output ?? 0;
+        byKey.set(key, cur);
+      }
+    }
+    return Array.from(byKey.values())
+      .map((v) => ({
+        ...v,
+        total_tokens: v.total_input + v.total_output,
+        costUsd: estimateCostUsd(v.total_input, v.total_output),
+      }))
+      .sort((a, b) => b.month.localeCompare(a.month) || (a.email ?? a.user_id).localeCompare(b.email ?? b.user_id));
+  }, [usage]);
+
   const formatCost = (usd: number) => {
     if (costCurrency === 'KRW' && krwPerUsd != null) {
       return `₩${(usd * krwPerUsd).toLocaleString('ko-KR', { maximumFractionDigits: 0 })}`;
@@ -219,6 +287,26 @@ export function Admin() {
                 {mode === 'total' ? '전체(사용자별)' : mode === 'daily' ? '일별' : '월별'}
               </button>
             ))}
+            {(viewMode === 'daily' || viewMode === 'monthly') && (
+              <>
+                <span className="text-slate-300 mx-1">|</span>
+                <span className="text-sm text-slate-500 mr-1">집계:</span>
+                <button
+                  type="button"
+                  onClick={() => setAggregateBy('all')}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${aggregateBy === 'all' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  전체
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAggregateBy('user')}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${aggregateBy === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                >
+                  아이디별
+                </button>
+              </>
+            )}
           </div>
         )}
 
@@ -226,7 +314,7 @@ export function Admin() {
           <div className="flex justify-center py-12">
             <Loader2 size={32} className="animate-spin text-indigo-600" />
           </div>
-        ) : viewMode === 'daily' ? (
+        ) : viewMode === 'daily' && aggregateBy === 'all' ? (
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -271,7 +359,54 @@ export function Admin() {
               </table>
             </div>
           </div>
-        ) : viewMode === 'monthly' ? (
+        ) : viewMode === 'daily' && aggregateBy === 'user' ? (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">날짜</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">아이디(이메일)</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">요청 횟수</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">입력 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">출력 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">총 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">
+                      예상 비용 <ArrowLeftRight size={14} className="inline ml-1 text-slate-400" title="클릭 시 달러↔원화" aria-label="클릭 시 달러↔원화" />
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyRowsByUser.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                        일별(아이디별) 기록이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    dailyRowsByUser.map((row, i) => (
+                      <tr key={`${row.date}_${row.user_id}_${i}`} className="border-b border-slate-100 hover:bg-slate-50/50">
+                        <td className="px-4 py-3 font-medium text-slate-800">{row.date}</td>
+                        <td className="px-4 py-3 text-slate-700">{row.email ?? row.user_id}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.request_count}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.total_input.toLocaleString()}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.total_output.toLocaleString()}</td>
+                        <td className="text-right px-4 py-3 font-medium text-slate-800">{row.total_tokens.toLocaleString()}</td>
+                        <td
+                          className="text-right px-4 py-3 font-medium text-slate-700 cursor-pointer select-none hover:bg-amber-50 rounded"
+                          onClick={toggleCostCurrency}
+                          title="클릭하면 달러↔원화 전환"
+                        >
+                          {formatCost(row.costUsd)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : viewMode === 'monthly' && aggregateBy === 'all' ? (
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -298,6 +433,53 @@ export function Admin() {
                     monthlyRows.map((row) => (
                       <tr key={row.month} className="border-b border-slate-100 hover:bg-slate-50/50">
                         <td className="px-4 py-3 font-medium text-slate-800">{row.month}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.request_count}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.total_input.toLocaleString()}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.total_output.toLocaleString()}</td>
+                        <td className="text-right px-4 py-3 font-medium text-slate-800">{row.total_tokens.toLocaleString()}</td>
+                        <td
+                          className="text-right px-4 py-3 font-medium text-slate-700 cursor-pointer select-none hover:bg-amber-50 rounded"
+                          onClick={toggleCostCurrency}
+                          title="클릭하면 달러↔원화 전환"
+                        >
+                          {formatCost(row.costUsd)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : viewMode === 'monthly' && aggregateBy === 'user' ? (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">월</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">아이디(이메일)</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">요청 횟수</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">입력 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">출력 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">총 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">
+                      예상 비용 <ArrowLeftRight size={14} className="inline ml-1 text-slate-400" title="클릭 시 달러↔원화" aria-label="클릭 시 달러↔원화" />
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthlyRowsByUser.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                        월별(아이디별) 기록이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    monthlyRowsByUser.map((row, i) => (
+                      <tr key={`${row.month}_${row.user_id}_${i}`} className="border-b border-slate-100 hover:bg-slate-50/50">
+                        <td className="px-4 py-3 font-medium text-slate-800">{row.month}</td>
+                        <td className="px-4 py-3 text-slate-700">{row.email ?? row.user_id}</td>
                         <td className="text-right px-4 py-3 text-slate-700">{row.request_count}</td>
                         <td className="text-right px-4 py-3 text-slate-700">{row.total_input.toLocaleString()}</td>
                         <td className="text-right px-4 py-3 text-slate-700">{row.total_output.toLocaleString()}</td>
