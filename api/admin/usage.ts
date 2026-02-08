@@ -36,10 +36,24 @@ export default async function handler(req: any, res: any) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  const { data: logs } = await supabase
+  // input_filename 컬럼이 없어도 기록은 항상 조회되도록: 먼저 전체 컬럼 시도, 실패 시 기본 컬럼만
+  let logs: { user_id: string; tokens_input: number; tokens_output: number; created_at: string | null; input_filename?: string | null }[] | null = null;
+  const withFilename = await supabase
     .from('usage_logs')
     .select('user_id, tokens_input, tokens_output, input_filename, created_at')
     .order('created_at', { ascending: false });
+  if (withFilename.error) {
+    const withoutFilename = await supabase
+      .from('usage_logs')
+      .select('user_id, tokens_input, tokens_output, created_at')
+      .order('created_at', { ascending: false });
+    logs = withoutFilename.data ?? null;
+    if (logs) {
+      logs = logs.map((row) => ({ ...row, input_filename: null as string | null }));
+    }
+  } else {
+    logs = withFilename.data;
+  }
 
   const { data: profiles } = await supabase.from('profiles').select('id, email');
 

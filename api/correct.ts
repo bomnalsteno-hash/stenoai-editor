@@ -145,12 +145,20 @@ export default async function handler(req: any, res: any) {
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
-    await supabaseAdmin.from('usage_logs').insert({
+    const row: { user_id: string; tokens_input: number; tokens_output: number; input_filename?: string | null } = {
       user_id: userId,
       tokens_input: tokensInput,
       tokens_output: tokensOutput,
       input_filename: inputFilename,
-    });
+    };
+    let insertResult = await supabaseAdmin.from('usage_logs').insert(row);
+    if (insertResult.error) {
+      delete (row as any).input_filename;
+      insertResult = await supabaseAdmin.from('usage_logs').insert(row);
+    }
+    if (insertResult.error) {
+      console.error('usage_logs insert error:', insertResult.error);
+    }
 
     return res.status(200).json({ result: resultText });
   } catch (err: any) {

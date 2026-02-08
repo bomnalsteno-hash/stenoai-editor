@@ -9,6 +9,7 @@ create table if not exists public.profiles (
 );
 
 -- 2. 토큰 사용 로그 (input_filename: 넣은 TXT 파일명, 없으면 null)
+-- 주의: 이 테이블은 사용량 감사용이므로 TRUNCATE/DELETE 하지 말 것.
 create table if not exists public.usage_logs (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references auth.users on delete cascade not null,
