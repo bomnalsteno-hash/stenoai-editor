@@ -38,17 +38,21 @@ export default async function handler(req: any, res: any) {
 
   const { data: logs } = await supabase
     .from('usage_logs')
-    .select('user_id, tokens_input, tokens_output, created_at')
+    .select('user_id, tokens_input, tokens_output, input_filename, created_at')
     .order('created_at', { ascending: false });
 
   const { data: profiles } = await supabase.from('profiles').select('id, email');
 
   const profileMap = new Map((profiles ?? []).map((p) => [p.id, p.email]));
 
-  const byUser = new Map<
-    string,
-    { total_input: number; total_output: number; request_count: number; last_used: string | null }
-  >();
+  type Agg = {
+    total_input: number;
+    total_output: number;
+    request_count: number;
+    last_used: string | null;
+    details: { input_filename: string | null; tokens_input: number; tokens_output: number; created_at: string | null }[];
+  };
+  const byUser = new Map<string, Agg>();
 
   for (const row of logs ?? []) {
     const cur = byUser.get(row.user_id) ?? {
@@ -56,6 +60,7 @@ export default async function handler(req: any, res: any) {
       total_output: 0,
       request_count: 0,
       last_used: null as string | null,
+      details: [],
     };
     cur.total_input += row.tokens_input ?? 0;
     cur.total_output += row.tokens_output ?? 0;
@@ -63,6 +68,12 @@ export default async function handler(req: any, res: any) {
     if (!cur.last_used || (row.created_at && row.created_at > cur.last_used)) {
       cur.last_used = row.created_at ?? null;
     }
+    cur.details.push({
+      input_filename: row.input_filename ?? null,
+      tokens_input: row.tokens_input ?? 0,
+      tokens_output: row.tokens_output ?? 0,
+      created_at: row.created_at ?? null,
+    });
     byUser.set(row.user_id, cur);
   }
 
@@ -74,6 +85,7 @@ export default async function handler(req: any, res: any) {
     total_tokens: agg.total_input + agg.total_output,
     last_used: agg.last_used,
     request_count: agg.request_count,
+    details: agg.details,
   }));
 
   usage.sort((a, b) => (b.last_used ?? '').localeCompare(a.last_used ?? ''));

@@ -8,12 +8,13 @@ create table if not exists public.profiles (
   created_at timestamptz default now()
 );
 
--- 2. 토큰 사용 로그
+-- 2. 토큰 사용 로그 (input_filename: 넣은 TXT 파일명, 없으면 null)
 create table if not exists public.usage_logs (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references auth.users on delete cascade not null,
   tokens_input int not null default 0,
   tokens_output int not null default 0,
+  input_filename text,
   created_at timestamptz default now()
 );
 

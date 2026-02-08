@@ -1,7 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Loader2, ArrowLeft, User, Calendar, Hash } from 'lucide-react';
+import { Shield, Loader2, ArrowLeft, User, Calendar, ChevronDown, ChevronRight, FileText } from 'lucide-react';
+
+type LogDetail = {
+  input_filename: string | null;
+  tokens_input: number;
+  tokens_output: number;
+  created_at: string | null;
+};
 
 type UsageRow = {
   user_id: string;
@@ -11,6 +18,7 @@ type UsageRow = {
   total_tokens: number;
   last_used: string | null;
   request_count: number;
+  details: LogDetail[];
 };
 
 export function Admin() {
@@ -18,6 +26,7 @@ export function Admin() {
   const [usage, setUsage] = useState<UsageRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session?.access_token || profile?.role !== 'admin') return;
@@ -105,47 +114,108 @@ export function Admin() {
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th className="text-left px-4 py-3 font-medium text-slate-600 flex items-center gap-1">
-                      <User size={14} /> 아이디(이메일)
+                    <th className="w-10 px-2 py-3" />
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">
+                      <User size={14} className="inline mr-1" /> 아이디(이메일)
                     </th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">요청 횟수</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">입력 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">출력 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">총 토큰</th>
-                    <th className="text-left px-4 py-3 font-medium text-slate-600 flex items-center gap-1">
-                      <Calendar size={14} /> 마지막 사용
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">
+                      <Calendar size={14} className="inline mr-1" /> 마지막 사용
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {usage.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                      <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                         사용 기록이 없습니다.
                       </td>
                     </tr>
                   ) : (
                     usage.map((row) => (
-                      <tr key={row.user_id} className="border-b border-slate-100 hover:bg-slate-50/50">
-                        <td className="px-4 py-3">
-                          <span className="font-medium text-slate-800">{row.email ?? row.user_id}</span>
-                          {row.email ? (
-                            <span className="block text-xs text-slate-400 font-mono">{row.user_id}</span>
-                          ) : null}
-                        </td>
-                        <td className="text-right px-4 py-3 text-slate-700">{row.request_count}</td>
-                        <td className="text-right px-4 py-3 text-slate-700">{row.total_input.toLocaleString()}</td>
-                        <td className="text-right px-4 py-3 text-slate-700">{row.total_output.toLocaleString()}</td>
-                        <td className="text-right px-4 py-3 font-medium text-slate-800">{row.total_tokens.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {row.last_used
-                            ? new Date(row.last_used).toLocaleString('ko-KR', {
-                                dateStyle: 'short',
-                                timeStyle: 'short',
-                              })
-                            : '-'}
-                        </td>
-                      </tr>
+                      <React.Fragment key={row.user_id}>
+                        <tr className="border-b border-slate-100 hover:bg-slate-50/50">
+                          <td className="px-2 py-3">
+                            {row.details.length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => setExpandedUserId((id) => (id === row.user_id ? null : row.user_id))}
+                                className="p-1 rounded hover:bg-slate-200 text-slate-500"
+                                aria-label={expandedUserId === row.user_id ? '접기' : '로그 펼치기'}
+                              >
+                                {expandedUserId === row.user_id ? (
+                                  <ChevronDown size={18} />
+                                ) : (
+                                  <ChevronRight size={18} />
+                                )}
+                              </button>
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="font-medium text-slate-800">{row.email ?? row.user_id}</span>
+                            {row.email ? (
+                              <span className="block text-xs text-slate-400 font-mono">{row.user_id}</span>
+                            ) : null}
+                          </td>
+                          <td className="text-right px-4 py-3 text-slate-700">{row.request_count}</td>
+                          <td className="text-right px-4 py-3 text-slate-700">{row.total_input.toLocaleString()}</td>
+                          <td className="text-right px-4 py-3 text-slate-700">{row.total_output.toLocaleString()}</td>
+                          <td className="text-right px-4 py-3 font-medium text-slate-800">{row.total_tokens.toLocaleString()}</td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {row.last_used
+                              ? new Date(row.last_used).toLocaleString('ko-KR', {
+                                  dateStyle: 'short',
+                                  timeStyle: 'short',
+                                })
+                              : '-'}
+                          </td>
+                        </tr>
+                        {expandedUserId === row.user_id && row.details.length > 0 ? (
+                          <tr className="bg-slate-50/80">
+                            <td colSpan={7} className="px-4 py-3">
+                              <div className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-1">
+                                <FileText size={12} /> 로그 기록 (요청별)
+                              </div>
+                              <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden bg-white">
+                                <thead>
+                                  <tr className="bg-slate-100">
+                                    <th className="text-left px-3 py-2 font-medium text-slate-600">파일명</th>
+                                    <th className="text-right px-3 py-2 font-medium text-slate-600">입력 토큰</th>
+                                    <th className="text-right px-3 py-2 font-medium text-slate-600">출력 토큰</th>
+                                    <th className="text-left px-3 py-2 font-medium text-slate-600">사용 시각</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {row.details.map((d, i) => (
+                                      <tr key={i} className="border-t border-slate-100">
+                                        <td className="px-3 py-2 text-slate-700">
+                                          {d.input_filename ?? '(붙여넣기)'}
+                                        </td>
+                                        <td className="text-right px-3 py-2 text-slate-700">
+                                          {d.tokens_input.toLocaleString()}
+                                        </td>
+                                        <td className="text-right px-3 py-2 text-slate-700">
+                                          {d.tokens_output.toLocaleString()}
+                                        </td>
+                                        <td className="px-3 py-2 text-slate-600">
+                                          {d.created_at
+                                            ? new Date(d.created_at).toLocaleString('ko-KR', {
+                                                dateStyle: 'short',
+                                                timeStyle: 'short',
+                                              })
+                                            : '-'}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                </tbody>
+                              </table>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </React.Fragment>
                     ))
                   )}
                 </tbody>
