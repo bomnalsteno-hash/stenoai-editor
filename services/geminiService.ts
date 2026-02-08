@@ -9,8 +9,11 @@ export const correctTranscript = async (
     'Content-Type': 'application/json',
     Authorization: `Bearer ${accessToken}`,
   };
+  // HTTP 헤더는 ISO-8859-1만 허용. 한글 등 비ASCII는 body(JSON UTF-8)로만 전달
   if (filename && typeof filename === 'string' && filename.trim()) {
-    headers['X-Input-Filename'] = filename.trim();
+    const name = filename.trim();
+    const isLatin1 = [...name].every((c) => c.charCodeAt(0) <= 255);
+    if (isLatin1) headers['X-Input-Filename'] = name;
   }
   const res = await fetch(`${API_BASE}/api/correct`, {
     method: 'POST',
