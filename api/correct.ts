@@ -161,6 +161,7 @@ export default async function handler(req: any, res: any) {
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
         temperature: 0.1,
+        maxOutputTokens: 65536,
       },
     });
 
@@ -186,6 +187,17 @@ export default async function handler(req: any, res: any) {
     }
     if (insertResult.error) {
       console.error('usage_logs insert error:', insertResult.error);
+    }
+
+    const docTitle =
+      (typeof inputFilename === 'string' && inputFilename.trim()) ? inputFilename.trim() : new Date().toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'medium' });
+    const docInsert = await supabaseAdmin.from('corrected_docs').insert({
+      user_id: userId,
+      title: docTitle,
+      content: resultText,
+    });
+    if (docInsert.error) {
+      console.error('corrected_docs insert error:', docInsert.error);
     }
 
     return res.status(200).json({ result: resultText });

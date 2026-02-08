@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Keyboard, Wand2, LogOut, Shield } from 'lucide-react';
+import { Keyboard, Wand2, LogOut, Shield, User } from 'lucide-react';
 
 export const Header: React.FC = () => {
   const { user, profile, signOut } = useAuth();
@@ -27,6 +27,13 @@ export const Header: React.FC = () => {
             {user.email}
           </span>
         )}
+        <Link
+          to="/mypage"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-indigo-600 border border-slate-200 rounded-lg hover:border-indigo-200 transition-colors"
+        >
+          <User size={14} />
+          마이페이지
+        </Link>
         {profile?.role === 'admin' && (
           <Link
             to="/admin"

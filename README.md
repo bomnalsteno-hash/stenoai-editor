@@ -6,6 +6,7 @@
 
 - **로그인/회원가입** (Supabase Auth)
 - **STT 초안** 입력·TXT 드래그 앤 드롭 → **AI 교정** → **교정본 다운로드** (같은 파일명)
+- **마이페이지** (`/mypage`): 교정한 파일 목록 유지 — TXT 드래그 시 파일명, 붙여넣기 시 사용 시각으로 제목 저장
 - **관리자 전용 페이지** (`/admin`): 아이디(이메일)별 토큰 사용량·마지막 사용 시각·요청 횟수 조회
 
 ## 로컬 실행
@@ -27,6 +28,7 @@
    - [supabase.com](https://supabase.com) 에서 프로젝트 생성
    - SQL Editor에서 [supabase/schema.sql](supabase/schema.sql) 실행
    - 관리자 로그에서 **파일명**이 보이게 하려면 [supabase/add-filename-column.sql](supabase/add-filename-column.sql) 도 실행
+   - **마이페이지**에 교정본 저장을 쓰려면 [supabase/corrected-docs-table.sql](supabase/corrected-docs-table.sql) 도 실행
    - Settings → API 에서 **URL**, **anon key**, **service_role key** 복사
 
 2. **관리자 지정**

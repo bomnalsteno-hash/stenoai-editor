@@ -6,6 +6,7 @@ import { Editor } from './components/Editor';
 import { Login } from './components/Login';
 import { Signup } from './components/Signup';
 import { Admin } from './components/Admin';
+import { MyPage } from './components/MyPage';
 import { Loader2 } from 'lucide-react';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -46,6 +47,14 @@ function App() {
         element={
           <ProtectedRoute>
             <EditorLayout />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/mypage"
+        element={
+          <ProtectedRoute>
+            <MyPage />
           </ProtectedRoute>
         }
       />
