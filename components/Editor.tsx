@@ -11,24 +11,28 @@ function splitLines(text: string): string[] {
   return lines.length ? lines : [];
 }
 
-/** 각 줄의 start/end 문자 위치 (textarea selection용) */
+/** 각 줄의 start/end 문자 위치. textarea selection과 맞추려면 원문(\r\n 포함) 기준으로 계산 */
 function getLineRanges(text: string): { start: number; end: number }[] {
   if (!text) return [];
-  const raw = text.replace(/\r\n/g, '\n');
   const boundaries: number[] = [0];
   let i = 0;
-  while (i < raw.length) {
-    const next = raw.indexOf('\n', i);
-    if (next === -1) break;
-    boundaries.push(next + 1);
-    i = next + 1;
+  while (i < text.length) {
+    if (text.slice(i, i + 2) === '\r\n') {
+      boundaries.push(i + 2);
+      i += 2;
+    } else if (text[i] === '\n' || text[i] === '\r') {
+      boundaries.push(i + 1);
+      i += 1;
+    } else {
+      i += 1;
+    }
   }
-  boundaries.push(raw.length);
+  boundaries.push(text.length);
   const ranges: { start: number; end: number }[] = [];
   for (let j = 0; j < boundaries.length - 1; j++) {
     ranges.push({ start: boundaries[j], end: boundaries[j + 1] });
   }
-  return ranges.length ? ranges : [{ start: 0, end: raw.length }];
+  return ranges.length ? ranges : [{ start: 0, end: text.length }];
 }
 
 interface EditorProps {}
