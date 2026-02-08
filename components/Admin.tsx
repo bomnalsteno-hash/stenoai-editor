@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Loader2, ArrowLeft, User, Calendar, ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { Shield, Loader2, ArrowLeft, User, Calendar, ChevronDown, ChevronRight, FileText, BarChart2 } from 'lucide-react';
 
 // Gemini 3 Flash Preview 단가 (USD/1M tokens): 입력 $0.50, 출력 $3.00
 const COST_PER_1M_INPUT = 0.5;
@@ -10,6 +10,9 @@ const COST_PER_1M_OUTPUT = 3;
 function estimateCostUsd(inputTokens: number, outputTokens: number): number {
   return (inputTokens * COST_PER_1M_INPUT) / 1e6 + (outputTokens * COST_PER_1M_OUTPUT) / 1e6;
 }
+
+type ViewMode = 'total' | 'daily' | 'monthly';
+type CostCurrency = 'USD' | 'KRW';
 
 type LogDetail = {
   input_filename: string | null;
@@ -35,6 +38,9 @@ export function Admin() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('total');
+  const [costCurrency, setCostCurrency] = useState<CostCurrency>('USD');
+  const [krwPerUsd, setKrwPerUsd] = useState<number | null>(null);
 
   useEffect(() => {
     if (!session?.access_token || profile?.role !== 'admin') return;
@@ -54,6 +60,87 @@ export function Admin() {
       }
     })();
   }, [session?.access_token, profile?.role]);
+
+  useEffect(() => {
+    const base = import.meta.env.VITE_APP_URL ?? '';
+    fetch(`${base}/api/exchange-rate`)
+      .then((r) => r.json())
+      .then((d) => setKrwPerUsd(typeof d?.krwPerUsd === 'number' ? d.krwPerUsd : null))
+      .catch(() => setKrwPerUsd(null));
+  }, []);
+
+  const dailyRows = useMemo(() => {
+    const byDay = new Map<
+      string,
+      { request_count: number; total_input: number; total_output: number }
+    >();
+    for (const row of usage) {
+      for (const d of row.details) {
+        if (!d.created_at) continue;
+        const day = new Date(d.created_at).toISOString().slice(0, 10);
+        const cur = byDay.get(day) ?? {
+          request_count: 0,
+          total_input: 0,
+          total_output: 0,
+        };
+        cur.request_count += 1;
+        cur.total_input += d.tokens_input ?? 0;
+        cur.total_output += d.tokens_output ?? 0;
+        byDay.set(day, cur);
+      }
+    }
+    return Array.from(byDay.entries())
+      .map(([date, agg]) => ({
+        date,
+        request_count: agg.request_count,
+        total_input: agg.total_input,
+        total_output: agg.total_output,
+        total_tokens: agg.total_input + agg.total_output,
+        costUsd: estimateCostUsd(agg.total_input, agg.total_output),
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [usage]);
+
+  const monthlyRows = useMemo(() => {
+    const byMonth = new Map<
+      string,
+      { request_count: number; total_input: number; total_output: number }
+    >();
+    for (const row of usage) {
+      for (const d of row.details) {
+        if (!d.created_at) continue;
+        const month = new Date(d.created_at).toISOString().slice(0, 7);
+        const cur = byMonth.get(month) ?? {
+          request_count: 0,
+          total_input: 0,
+          total_output: 0,
+        };
+        cur.request_count += 1;
+        cur.total_input += d.tokens_input ?? 0;
+        cur.total_output += d.tokens_output ?? 0;
+        byMonth.set(month, cur);
+      }
+    }
+    return Array.from(byMonth.entries())
+      .map(([month, agg]) => ({
+        month,
+        request_count: agg.request_count,
+        total_input: agg.total_input,
+        total_output: agg.total_output,
+        total_tokens: agg.total_input + agg.total_output,
+        costUsd: estimateCostUsd(agg.total_input, agg.total_output),
+      }))
+      .sort((a, b) => b.month.localeCompare(a.month));
+  }, [usage]);
+
+  const formatCost = (usd: number) => {
+    if (costCurrency === 'KRW' && krwPerUsd != null) {
+      return `₩${(usd * krwPerUsd).toLocaleString('ko-KR', { maximumFractionDigits: 0 })}`;
+    }
+    return `$${usd.toFixed(4)}`;
+  };
+
+  const toggleCostCurrency = () => setCostCurrency((c) => (c === 'USD' ? 'KRW' : 'USD'));
 
   if (authLoading) {
     return (
@@ -112,9 +199,122 @@ export function Admin() {
             {error}
           </div>
         )}
+
+        {!loading && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <span className="text-sm text-slate-500 mr-1">보기:</span>
+            {(['total', 'daily', 'monthly'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                className={`
+                  flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+                  ${viewMode === mode ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}
+                `}
+              >
+                {mode === 'total' && <User size={14} />}
+                {mode === 'daily' && <Calendar size={14} />}
+                {mode === 'monthly' && <BarChart2 size={14} />}
+                {mode === 'total' ? '전체(사용자별)' : mode === 'daily' ? '일별' : '월별'}
+              </button>
+            ))}
+          </div>
+        )}
+
         {loading ? (
           <div className="flex justify-center py-12">
             <Loader2 size={32} className="animate-spin text-indigo-600" />
+          </div>
+        ) : viewMode === 'daily' ? (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">날짜</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">요청 횟수</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">입력 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">출력 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">총 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">
+                      예상 비용 <span className="text-xs font-normal text-slate-400">(클릭 시 달러↔원화)</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        일별 기록이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    dailyRows.map((row) => (
+                      <tr key={row.date} className="border-b border-slate-100 hover:bg-slate-50/50">
+                        <td className="px-4 py-3 font-medium text-slate-800">{row.date}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.request_count}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.total_input.toLocaleString()}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.total_output.toLocaleString()}</td>
+                        <td className="text-right px-4 py-3 font-medium text-slate-800">{row.total_tokens.toLocaleString()}</td>
+                        <td
+                          className="text-right px-4 py-3 font-medium text-slate-700 cursor-pointer select-none hover:bg-amber-50 rounded"
+                          onClick={toggleCostCurrency}
+                          title="클릭하면 달러↔원화 전환"
+                        >
+                          {formatCost(row.costUsd)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : viewMode === 'monthly' ? (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium text-slate-600">월</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">요청 횟수</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">입력 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">출력 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">총 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">
+                      예상 비용 <span className="text-xs font-normal text-slate-400">(클릭 시 달러↔원화)</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthlyRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        월별 기록이 없습니다.
+                      </td>
+                    </tr>
+                  ) : (
+                    monthlyRows.map((row) => (
+                      <tr key={row.month} className="border-b border-slate-100 hover:bg-slate-50/50">
+                        <td className="px-4 py-3 font-medium text-slate-800">{row.month}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.request_count}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.total_input.toLocaleString()}</td>
+                        <td className="text-right px-4 py-3 text-slate-700">{row.total_output.toLocaleString()}</td>
+                        <td className="text-right px-4 py-3 font-medium text-slate-800">{row.total_tokens.toLocaleString()}</td>
+                        <td
+                          className="text-right px-4 py-3 font-medium text-slate-700 cursor-pointer select-none hover:bg-amber-50 rounded"
+                          onClick={toggleCostCurrency}
+                          title="클릭하면 달러↔원화 전환"
+                        >
+                          {formatCost(row.costUsd)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -130,7 +330,9 @@ export function Admin() {
                     <th className="text-right px-4 py-3 font-medium text-slate-600">입력 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">출력 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">총 토큰</th>
-                    <th className="text-right px-4 py-3 font-medium text-slate-600">예상 비용</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">
+                      예상 비용 <span className="text-xs font-normal text-slate-400">(클릭 시 달러↔원화)</span>
+                    </th>
                     <th className="text-left px-4 py-3 font-medium text-slate-600">
                       <Calendar size={14} className="inline mr-1" /> 마지막 사용
                     </th>
@@ -173,8 +375,12 @@ export function Admin() {
                           <td className="text-right px-4 py-3 text-slate-700">{row.total_input.toLocaleString()}</td>
                           <td className="text-right px-4 py-3 text-slate-700">{row.total_output.toLocaleString()}</td>
                           <td className="text-right px-4 py-3 font-medium text-slate-800">{row.total_tokens.toLocaleString()}</td>
-                          <td className="text-right px-4 py-3 text-slate-700 font-medium">
-                            ${estimateCostUsd(row.total_input, row.total_output).toFixed(4)}
+                          <td
+                            className="text-right px-4 py-3 text-slate-700 font-medium cursor-pointer select-none hover:bg-amber-50 rounded"
+                            onClick={toggleCostCurrency}
+                            title="클릭하면 달러↔원화 전환"
+                          >
+                            {formatCost(estimateCostUsd(row.total_input, row.total_output))}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
                             {row.last_used
@@ -197,7 +403,7 @@ export function Admin() {
                                     <th className="text-left px-3 py-2 font-medium text-slate-600">파일명</th>
                                     <th className="text-right px-3 py-2 font-medium text-slate-600">입력 토큰</th>
                                     <th className="text-right px-3 py-2 font-medium text-slate-600">출력 토큰</th>
-                                    <th className="text-right px-3 py-2 font-medium text-slate-600">예상 비용</th>
+                                    <th className="text-right px-3 py-2 font-medium text-slate-600">예상 비용 (클릭 시 달러↔원화)</th>
                                     <th className="text-left px-3 py-2 font-medium text-slate-600">사용 시각</th>
                                   </tr>
                                 </thead>
@@ -213,9 +419,13 @@ export function Admin() {
                                         <td className="text-right px-3 py-2 text-slate-700">
                                           {d.tokens_output.toLocaleString()}
                                         </td>
-                                        <td className="text-right px-3 py-2 text-slate-700 font-medium">
-                                          ${estimateCostUsd(d.tokens_input, d.tokens_output).toFixed(4)}
-                                        </td>
+                                        <td
+                                        className="text-right px-3 py-2 text-slate-700 font-medium cursor-pointer select-none hover:bg-amber-50 rounded"
+                                        onClick={toggleCostCurrency}
+                                        title="클릭하면 달러↔원화 전환"
+                                      >
+                                        {formatCost(estimateCostUsd(d.tokens_input, d.tokens_output))}
+                                      </td>
                                         <td className="px-3 py-2 text-slate-600">
                                           {d.created_at
                                             ? new Date(d.created_at).toLocaleString('ko-KR', {
