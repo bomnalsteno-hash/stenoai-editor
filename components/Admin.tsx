@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Loader2, ArrowLeft, User, Calendar, ChevronDown, ChevronRight, FileText, BarChart2 } from 'lucide-react';
+import { Shield, Loader2, ArrowLeft, User, Calendar, ChevronDown, ChevronRight, FileText, BarChart2, ArrowLeftRight } from 'lucide-react';
 
 // Gemini 3 Flash Preview 단가 (USD/1M tokens): 입력 $0.50, 출력 $3.00
 const COST_PER_1M_INPUT = 0.5;
@@ -238,7 +238,7 @@ export function Admin() {
                     <th className="text-right px-4 py-3 font-medium text-slate-600">출력 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">총 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">
-                      예상 비용 <span className="text-xs font-normal text-slate-400">(클릭 시 달러↔원화)</span>
+                      예상 비용 <ArrowLeftRight size={14} className="inline ml-1 text-slate-400" title="클릭 시 달러↔원화" aria-label="클릭 시 달러↔원화" />
                     </th>
                   </tr>
                 </thead>
@@ -283,7 +283,7 @@ export function Admin() {
                     <th className="text-right px-4 py-3 font-medium text-slate-600">출력 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">총 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">
-                      예상 비용 <span className="text-xs font-normal text-slate-400">(클릭 시 달러↔원화)</span>
+                      예상 비용 <ArrowLeftRight size={14} className="inline ml-1 text-slate-400" title="클릭 시 달러↔원화" aria-label="클릭 시 달러↔원화" />
                     </th>
                   </tr>
                 </thead>
@@ -331,7 +331,7 @@ export function Admin() {
                     <th className="text-right px-4 py-3 font-medium text-slate-600">출력 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">총 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">
-                      예상 비용 <span className="text-xs font-normal text-slate-400">(클릭 시 달러↔원화)</span>
+                      예상 비용 <ArrowLeftRight size={14} className="inline ml-1 text-slate-400" title="클릭 시 달러↔원화" aria-label="클릭 시 달러↔원화" />
                     </th>
                     <th className="text-left px-4 py-3 font-medium text-slate-600">
                       <Calendar size={14} className="inline mr-1" /> 마지막 사용
@@ -403,7 +403,9 @@ export function Admin() {
                                     <th className="text-left px-3 py-2 font-medium text-slate-600">파일명</th>
                                     <th className="text-right px-3 py-2 font-medium text-slate-600">입력 토큰</th>
                                     <th className="text-right px-3 py-2 font-medium text-slate-600">출력 토큰</th>
-                                    <th className="text-right px-3 py-2 font-medium text-slate-600">예상 비용 (클릭 시 달러↔원화)</th>
+                                    <th className="text-right px-3 py-2 font-medium text-slate-600">
+                                    예상 비용 <ArrowLeftRight size={14} className="inline ml-1 text-slate-400" title="클릭 시 달러↔원화" aria-label="클릭 시 달러↔원화" />
+                                  </th>
                                     <th className="text-left px-3 py-2 font-medium text-slate-600">사용 시각</th>
                                   </tr>
                                 </thead>
