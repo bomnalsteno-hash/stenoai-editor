@@ -105,7 +105,7 @@ async function getUserIdFromToken(token: string): Promise<string | null> {
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Input-Filename');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -120,7 +120,9 @@ export default async function handler(req: any, res: any) {
   const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
   const text = body.text?.trim();
   if (!text) return res.status(400).json({ error: '텍스트가 없습니다.' });
-  const inputFilename = typeof body.filename === 'string' ? body.filename.trim() || null : null;
+  const headerFilename = req.headers?.['x-input-filename'];
+  const bodyFilename = typeof body.filename === 'string' ? body.filename.trim() || null : null;
+  const inputFilename = bodyFilename ?? (typeof headerFilename === 'string' ? headerFilename.trim() || null : null);
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return res.status(500).json({ error: '서버 설정 오류입니다.' });
