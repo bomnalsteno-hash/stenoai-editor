@@ -3,6 +3,14 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Shield, Loader2, ArrowLeft, User, Calendar, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 
+// Gemini 3 Flash Preview 단가 (USD/1M tokens): 입력 $0.50, 출력 $3.00
+const COST_PER_1M_INPUT = 0.5;
+const COST_PER_1M_OUTPUT = 3;
+
+function estimateCostUsd(inputTokens: number, outputTokens: number): number {
+  return (inputTokens * COST_PER_1M_INPUT) / 1e6 + (outputTokens * COST_PER_1M_OUTPUT) / 1e6;
+}
+
 type LogDetail = {
   input_filename: string | null;
   tokens_input: number;
@@ -122,6 +130,7 @@ export function Admin() {
                     <th className="text-right px-4 py-3 font-medium text-slate-600">입력 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">출력 토큰</th>
                     <th className="text-right px-4 py-3 font-medium text-slate-600">총 토큰</th>
+                    <th className="text-right px-4 py-3 font-medium text-slate-600">예상 비용</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-600">
                       <Calendar size={14} className="inline mr-1" /> 마지막 사용
                     </th>
@@ -130,7 +139,7 @@ export function Admin() {
                 <tbody>
                   {usage.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                      <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                         사용 기록이 없습니다.
                       </td>
                     </tr>
@@ -164,6 +173,9 @@ export function Admin() {
                           <td className="text-right px-4 py-3 text-slate-700">{row.total_input.toLocaleString()}</td>
                           <td className="text-right px-4 py-3 text-slate-700">{row.total_output.toLocaleString()}</td>
                           <td className="text-right px-4 py-3 font-medium text-slate-800">{row.total_tokens.toLocaleString()}</td>
+                          <td className="text-right px-4 py-3 text-slate-700 font-medium">
+                            ${estimateCostUsd(row.total_input, row.total_output).toFixed(4)}
+                          </td>
                           <td className="px-4 py-3 text-slate-600">
                             {row.last_used
                               ? new Date(row.last_used).toLocaleString('ko-KR', {
@@ -175,7 +187,7 @@ export function Admin() {
                         </tr>
                         {expandedUserId === row.user_id && row.details.length > 0 ? (
                           <tr className="bg-slate-50/80">
-                            <td colSpan={7} className="px-4 py-3">
+                            <td colSpan={8} className="px-4 py-3">
                               <div className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-1">
                                 <FileText size={12} /> 로그 기록 (요청별)
                               </div>
@@ -185,6 +197,7 @@ export function Admin() {
                                     <th className="text-left px-3 py-2 font-medium text-slate-600">파일명</th>
                                     <th className="text-right px-3 py-2 font-medium text-slate-600">입력 토큰</th>
                                     <th className="text-right px-3 py-2 font-medium text-slate-600">출력 토큰</th>
+                                    <th className="text-right px-3 py-2 font-medium text-slate-600">예상 비용</th>
                                     <th className="text-left px-3 py-2 font-medium text-slate-600">사용 시각</th>
                                   </tr>
                                 </thead>
@@ -192,13 +205,16 @@ export function Admin() {
                                   {row.details.map((d, i) => (
                                       <tr key={i} className="border-t border-slate-100">
                                         <td className="px-3 py-2 text-slate-700">
-                                          {d.input_filename ?? '(붙여넣기)'}
+                                          {d.input_filename && d.input_filename.trim() !== '' ? d.input_filename : '(붙여넣기)'}
                                         </td>
                                         <td className="text-right px-3 py-2 text-slate-700">
                                           {d.tokens_input.toLocaleString()}
                                         </td>
                                         <td className="text-right px-3 py-2 text-slate-700">
                                           {d.tokens_output.toLocaleString()}
+                                        </td>
+                                        <td className="text-right px-3 py-2 text-slate-700 font-medium">
+                                          ${estimateCostUsd(d.tokens_input, d.tokens_output).toFixed(4)}
                                         </td>
                                         <td className="px-3 py-2 text-slate-600">
                                           {d.created_at

@@ -26,6 +26,7 @@
 1. **Supabase**
    - [supabase.com](https://supabase.com) 에서 프로젝트 생성
    - SQL Editor에서 [supabase/schema.sql](supabase/schema.sql) 실행
+   - 관리자 로그에서 **파일명**이 보이게 하려면 [supabase/add-filename-column.sql](supabase/add-filename-column.sql) 도 실행
    - Settings → API 에서 **URL**, **anon key**, **service_role key** 복사
 
 2. **관리자 지정**

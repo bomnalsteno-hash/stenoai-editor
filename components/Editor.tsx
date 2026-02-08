@@ -16,6 +16,8 @@ export const Editor: React.FC<EditorProps> = () => {
   const [inputFileName, setInputFileName] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const inputFileNameRef = useRef<string | null>(null);
+  inputFileNameRef.current = inputFileName;
 
   const handleDownload = useCallback(() => {
     if (!outputText) return;
@@ -66,7 +68,8 @@ export const Editor: React.FC<EditorProps> = () => {
 
     try {
       if (!session?.access_token) throw new Error('로그인이 필요합니다.');
-      const result = await correctTranscript(inputText, session.access_token, inputFileName);
+      const filenameToSend = inputFileNameRef.current ?? inputFileName;
+      const result = await correctTranscript(inputText, session.access_token, filenameToSend);
       setOutputText(result);
     } catch (err: any) {
       setError(err.message || "교정 중 오류가 발생했습니다. 다시 시도해주세요.");
