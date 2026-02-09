@@ -47,6 +47,26 @@
    - Vercel에서 배포 URL이 `https://xxx.vercel.app` 이면, 같은 도메인에서 API를 쓰므로 `VITE_APP_URL` 은 비워두면 됨.
    - 다른 도메인에서 API를 호출할 경우에만 `VITE_APP_URL` 에 API 기준 URL 설정
 
+## 브랜치·배포 흐름
+
+- **`main`**: 공개용 안정 버전. 사용자에게 보이는 주소는 이 브랜치 기준으로 배포한다.
+- **`develop`**: 비공개 개발용. 여기서 수정·푸시하면 Preview URL로만 배포되며, 공개 주소는 바뀌지 않는다.
+- **v2가 안정되면**: `develop`을 `main`에 머지한 뒤 `main`을 푸시하면 공개 버전이 v2로 갱신된다.
+
+```bash
+# 평소 개발 (비공개 주소만 갱신)
+git checkout develop
+git add . && git commit -m "메시지"
+git push origin develop
+
+# v2를 공개 버전으로 올릴 때
+git checkout main
+git merge develop
+git push origin main
+```
+
+- **태그**: 현재 공개 버전은 `v1.0-public` 태그로 기억해 두었다. 나중에 `git checkout v1.0-public` 로 그 시점으로 돌아갈 수 있다.
+
 ## GitHub 푸시
 
 ```bash
@@ -55,4 +75,4 @@ git commit -m "메시지"
 git push
 ```
 
-Vercel과 GitHub를 연동해 두면 `main` 브랜치 푸시 시 자동 배포됩니다.
+Vercel과 GitHub를 연동해 두면 `main` 브랜치 푸시 시 **공개** 배포, `develop` 푸시 시 **Preview** 배포만 된다.
