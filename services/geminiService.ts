@@ -1,5 +1,8 @@
 const API_BASE = import.meta.env.VITE_APP_URL ?? '';
 
+/** 한 청크/요청당 클라이언트에서 기다릴 최대 시간 (ms). 이 시간을 넘기면 된 부분까지만 보여주고 중단. */
+const CLIENT_TIMEOUT_MS = 120_000; // 120초
+
 /** 한 번에 API로 보낼 최대 글자 수. 이보다 길면 자동으로 잘라서 여러 번 요청 후 합침. (타임아웃 방지로 2500) */
 export const CHUNK_SIZE = 2500;
 
@@ -27,28 +30,40 @@ export const correctTranscript = async (
   }
   const OVERLOADED_MSG = 'AI 서버가 일시적으로 바쁩니다. 잠시 후 다시 시도해주세요.';
   const run = async (isRetry: boolean): Promise<string> => {
-    const res = await fetch(`${API_BASE}/api/correct`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ text: draftText, filename: filename ?? undefined }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const errText = data.error ?? '';
-      const isOverloaded =
-        res.status === 503 || (typeof errText === 'string' && /overload|바쁩니다/i.test(errText));
-      if (isOverloaded && !isRetry) {
-        await new Promise((r) => setTimeout(r, 7000));
-        return run(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${API_BASE}/api/correct`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ text: draftText, filename: filename ?? undefined }),
+        signal: controller.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errText = data.error ?? '';
+        const isOverloaded =
+          res.status === 503 || (typeof errText === 'string' && /overload|바쁩니다/i.test(errText));
+        if (isOverloaded && !isRetry) {
+          await new Promise((r) => setTimeout(r, 7000));
+          return run(true);
+        }
+        if (isOverloaded) throw new Error(OVERLOADED_MSG);
+        if (res.status === 504 && !isRetry) {
+          await new Promise((r) => setTimeout(r, 2000));
+          return run(true);
+        }
+        throw new Error(typeof errText === 'string' ? errText : '교정 요청에 실패했습니다.');
       }
-      if (isOverloaded) throw new Error(OVERLOADED_MSG);
-      if (res.status === 504 && !isRetry) {
-        await new Promise((r) => setTimeout(r, 2000));
-        return run(true);
+      return data.result ?? '';
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        throw new Error('AI 응답이 120초 이상 지연되어 중단했습니다. 된 부분까지만 확인한 뒤 잠시 후 다시 시도해주세요.');
       }
-      throw new Error(typeof errText === 'string' ? errText : '교정 요청에 실패했습니다.');
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    return data.result ?? '';
   };
   return run(false);
 };
