@@ -167,14 +167,14 @@ export const Editor: React.FC<EditorProps> = () => {
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 <span>
-                  교정 중...
+                  {remainingText ? '이어 교정 중...' : '교정 중...'}
                   {chunkProgress ? ` (${chunkProgress.current}/${chunkProgress.total})` : ''}
                 </span>
               </>
             ) : (
               <>
                 <Sparkles size={16} />
-                <span>AI 교정 시작</span>
+                <span>{remainingText ? '이어서 교정하기' : 'AI 교정 시작'}</span>
               </>
             )}
           </button>
