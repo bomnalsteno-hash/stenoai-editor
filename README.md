@@ -29,6 +29,7 @@
    - SQL Editor에서 [supabase/schema.sql](supabase/schema.sql) 실행
    - 관리자 로그에서 **파일명**이 보이게 하려면 [supabase/add-filename-column.sql](supabase/add-filename-column.sql) 도 실행
    - **마이페이지**에 교정본 저장을 쓰려면 [supabase/corrected-docs-table.sql](supabase/corrected-docs-table.sql) 도 실행
+   - 긴 텍스트 청크 교정 시 **관리자 페이지에서 한 파일당 한 건**으로 보이게 하려면 [supabase/add-batch-id-column.sql](supabase/add-batch-id-column.sql) 도 실행
    - Settings → API 에서 **URL**, **anon key**, **service_role key** 복사
 
 2. **관리자 지정**

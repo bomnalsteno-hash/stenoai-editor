@@ -7,13 +7,18 @@ export const correctTranscript = async (
   draftText: string,
   accessToken: string,
   filename?: string | null,
-  options?: { skipSave?: boolean }
+  options?: { skipSave?: boolean; batchId?: string; chunkIndex?: number; chunkTotal?: number }
 ): Promise<string> => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${accessToken}`,
   };
   if (options?.skipSave) headers['X-Skip-Save'] = 'true';
+  if (options?.batchId && options?.chunkTotal != null && options?.chunkIndex != null) {
+    headers['X-Batch-Id'] = options.batchId;
+    headers['X-Chunk-Index'] = String(options.chunkIndex);
+    headers['X-Chunk-Total'] = String(options.chunkTotal);
+  }
   // HTTP 헤더는 ISO-8859-1만 허용. 한글 등 비ASCII는 body(JSON UTF-8)로만 전달
   if (filename && typeof filename === 'string' && filename.trim()) {
     const name = filename.trim();
@@ -83,11 +88,15 @@ export const correctTranscriptChunked = async (
     return correctTranscript(draftText, accessToken, filename);
   }
 
+  const batchId = crypto.randomUUID();
   const results: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
     onProgress?.(i + 1, chunks.length);
     const result = await correctTranscript(chunks[i], accessToken, i === 0 ? filename : null, {
       skipSave: true,
+      batchId,
+      chunkIndex: i,
+      chunkTotal: chunks.length,
     });
     results.push(result);
   }

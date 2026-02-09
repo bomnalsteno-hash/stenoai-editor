@@ -158,7 +158,7 @@ async function getUserIdFromToken(token: string): Promise<string | null> {
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Input-Filename, X-Skip-Save');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Input-Filename, X-Skip-Save, X-Batch-Id, X-Chunk-Index, X-Chunk-Total');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -197,23 +197,86 @@ export default async function handler(req: any, res: any) {
     const tokensInput = Number(usageMetadata.promptTokenCount ?? usageMetadata.prompt_token_count ?? 0);
     const tokensOutput = Number(usageMetadata.candidatesTokenCount ?? usageMetadata.candidates_token_count ?? 0);
 
+    const batchIdRaw = req.headers?.['x-batch-id'];
+    const chunkIndexRaw = req.headers?.['x-chunk-index'];
+    const chunkTotalRaw = req.headers?.['x-chunk-total'];
+    const chunkIndex = typeof chunkIndexRaw === 'string' ? parseInt(chunkIndexRaw, 10) : NaN;
+    const chunkTotal = typeof chunkTotalRaw === 'string' ? parseInt(chunkTotalRaw, 10) : NaN;
+    const isChunked = Number.isFinite(chunkTotal) && chunkTotal > 1;
+    const batchId = typeof batchIdRaw === 'string' && /^[0-9a-f-]{36}$/i.test(batchIdRaw.trim()) ? batchIdRaw.trim() : null;
+
     const supabaseAdmin = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
-    const row: { user_id: string; tokens_input: number; tokens_output: number; input_filename?: string | null } = {
-      user_id: userId,
-      tokens_input: tokensInput,
-      tokens_output: tokensOutput,
-      input_filename: inputFilename,
-    };
-    let insertResult = await supabaseAdmin.from('usage_logs').insert(row);
-    if (insertResult.error) {
-      delete (row as any).input_filename;
-      insertResult = await supabaseAdmin.from('usage_logs').insert(row);
-    }
-    if (insertResult.error) {
-      console.error('usage_logs insert error:', insertResult.error);
+
+    if (isChunked && batchId && Number.isFinite(chunkIndex)) {
+      if (chunkIndex === 0) {
+        const row: { user_id: string; tokens_input: number; tokens_output: number; input_filename?: string | null; batch_id?: string | null } = {
+          user_id: userId,
+          tokens_input: tokensInput,
+          tokens_output: tokensOutput,
+          input_filename: inputFilename,
+          batch_id: batchId,
+        };
+        let insertResult = await supabaseAdmin.from('usage_logs').insert(row);
+        if (insertResult.error) {
+          delete (row as any).input_filename;
+          delete (row as any).batch_id;
+          insertResult = await supabaseAdmin.from('usage_logs').insert(row);
+        }
+        if (insertResult.error) {
+          console.error('usage_logs insert error (batch first):', insertResult.error);
+        }
+      } else {
+        const { data: existing } = await supabaseAdmin
+          .from('usage_logs')
+          .select('id, tokens_input, tokens_output')
+          .eq('user_id', userId)
+          .eq('batch_id', batchId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        if (existing) {
+          const updateResult = await supabaseAdmin
+            .from('usage_logs')
+            .update({
+              tokens_input: (existing.tokens_input ?? 0) + tokensInput,
+              tokens_output: (existing.tokens_output ?? 0) + tokensOutput,
+            })
+            .eq('id', existing.id);
+          if (updateResult.error) {
+            console.error('usage_logs update error (batch chunk):', updateResult.error);
+          }
+        } else {
+          const row: { user_id: string; tokens_input: number; tokens_output: number; input_filename?: string | null; batch_id?: string | null } = {
+            user_id: userId,
+            tokens_input: tokensInput,
+            tokens_output: tokensOutput,
+            input_filename: inputFilename,
+            batch_id: batchId,
+          };
+          const insertResult = await supabaseAdmin.from('usage_logs').insert(row);
+          if (insertResult.error) {
+            console.error('usage_logs insert fallback (batch chunk):', insertResult.error);
+          }
+        }
+      }
+    } else {
+      const row: { user_id: string; tokens_input: number; tokens_output: number; input_filename?: string | null } = {
+        user_id: userId,
+        tokens_input: tokensInput,
+        tokens_output: tokensOutput,
+        input_filename: inputFilename,
+      };
+      let insertResult = await supabaseAdmin.from('usage_logs').insert(row);
+      if (insertResult.error) {
+        delete (row as any).input_filename;
+        insertResult = await supabaseAdmin.from('usage_logs').insert(row);
+      }
+      if (insertResult.error) {
+        console.error('usage_logs insert error:', insertResult.error);
+      }
     }
 
     const skipSave = (req.headers?.['x-skip-save'] ?? '').toString().toLowerCase() === 'true';

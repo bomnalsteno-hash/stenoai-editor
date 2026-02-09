@@ -36,23 +36,29 @@ export default async function handler(req: any, res: any) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // input_filename 컬럼이 없어도 기록은 항상 조회되도록: 먼저 전체 컬럼 시도, 실패 시 기본 컬럼만
-  let logs: { user_id: string; tokens_input: number; tokens_output: number; created_at: string | null; input_filename?: string | null }[] | null = null;
-  const withFilename = await supabase
+  // input_filename, batch_id 컬럼이 없어도 기록은 항상 조회되도록
+  type LogRow = { user_id: string; tokens_input: number; tokens_output: number; created_at: string | null; input_filename?: string | null; batch_id?: string | null };
+  let logs: LogRow[] | null = null;
+  const withBatch = await supabase
     .from('usage_logs')
-    .select('user_id, tokens_input, tokens_output, input_filename, created_at')
+    .select('user_id, tokens_input, tokens_output, input_filename, created_at, batch_id')
     .order('created_at', { ascending: false });
-  if (withFilename.error) {
-    const withoutFilename = await supabase
+  if (withBatch.error) {
+    const withFilename = await supabase
       .from('usage_logs')
-      .select('user_id, tokens_input, tokens_output, created_at')
+      .select('user_id, tokens_input, tokens_output, input_filename, created_at')
       .order('created_at', { ascending: false });
-    logs = withoutFilename.data ?? null;
-    if (logs) {
-      logs = logs.map((row) => ({ ...row, input_filename: null as string | null }));
+    if (withFilename.error) {
+      const basic = await supabase
+        .from('usage_logs')
+        .select('user_id, tokens_input, tokens_output, created_at')
+        .order('created_at', { ascending: false });
+      logs = (basic.data ?? []).map((row) => ({ ...row, input_filename: null as string | null, batch_id: null as string | null }));
+    } else {
+      logs = (withFilename.data ?? []).map((row) => ({ ...row, batch_id: null as string | null }));
     }
   } else {
-    logs = withFilename.data;
+    logs = withBatch.data as LogRow[];
   }
 
   const { data: profiles } = await supabase.from('profiles').select('id, email');
@@ -68,27 +74,49 @@ export default async function handler(req: any, res: any) {
   };
   const byUser = new Map<string, Agg>();
 
+  // batch_id가 같으면 한 파일(한 번의 교정 실행)로 묶음. batch_id 없으면 행마다 한 건
+  const byUserAndBatch = new Map<string, { input_filename: string | null; tokens_input: number; tokens_output: number; created_at: string | null }[]>();
+  let singleIndex = 0;
   for (const row of logs ?? []) {
-    const cur = byUser.get(row.user_id) ?? {
+    const r = row as LogRow;
+    const batchKey = r.batch_id ?? `single-${singleIndex++}`;
+    const key = `${row.user_id}:${batchKey}`;
+    const list = byUserAndBatch.get(key) ?? [];
+    list.push({
+      input_filename: row.input_filename ?? null,
+      tokens_input: row.tokens_input ?? 0,
+      tokens_output: row.tokens_output ?? 0,
+      created_at: row.created_at ?? null,
+    });
+    byUserAndBatch.set(key, list);
+  }
+
+  for (const [key, list] of byUserAndBatch) {
+    const user_id = key.split(':')[0];
+    const tokens_input = list.reduce((s, d) => s + d.tokens_input, 0);
+    const tokens_output = list.reduce((s, d) => s + d.tokens_output, 0);
+    const created_at = list.map((d) => d.created_at).filter(Boolean).sort().pop() ?? null;
+    const first = list[0];
+    const cur = byUser.get(user_id) ?? {
       total_input: 0,
       total_output: 0,
       request_count: 0,
       last_used: null as string | null,
       details: [],
     };
-    cur.total_input += row.tokens_input ?? 0;
-    cur.total_output += row.tokens_output ?? 0;
+    cur.total_input += tokens_input;
+    cur.total_output += tokens_output;
     cur.request_count += 1;
-    if (!cur.last_used || (row.created_at && row.created_at > cur.last_used)) {
-      cur.last_used = row.created_at ?? null;
+    if (!cur.last_used || (created_at && created_at > cur.last_used)) {
+      cur.last_used = created_at;
     }
     cur.details.push({
-      input_filename: row.input_filename ?? null,
-      tokens_input: row.tokens_input ?? 0,
-      tokens_output: row.tokens_output ?? 0,
-      created_at: row.created_at ?? null,
+      input_filename: first?.input_filename ?? null,
+      tokens_input,
+      tokens_output,
+      created_at,
     });
-    byUser.set(row.user_id, cur);
+    byUser.set(user_id, cur);
   }
 
   const usage = Array.from(byUser.entries()).map(([user_id, agg]) => ({
