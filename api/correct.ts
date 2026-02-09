@@ -158,7 +158,7 @@ async function getUserIdFromToken(token: string): Promise<string | null> {
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Input-Filename');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Input-Filename, X-Skip-Save');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -216,15 +216,18 @@ export default async function handler(req: any, res: any) {
       console.error('usage_logs insert error:', insertResult.error);
     }
 
-    const docTitle =
-      (typeof inputFilename === 'string' && inputFilename.trim()) ? inputFilename.trim() : new Date().toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'medium' });
-    const docInsert = await supabaseAdmin.from('corrected_docs').insert({
-      user_id: userId,
-      title: docTitle,
-      content: resultText,
-    });
-    if (docInsert.error) {
-      console.error('corrected_docs insert error:', docInsert.error);
+    const skipSave = (req.headers?.['x-skip-save'] ?? '').toString().toLowerCase() === 'true';
+    if (!skipSave) {
+      const docTitle =
+        (typeof inputFilename === 'string' && inputFilename.trim()) ? inputFilename.trim() : new Date().toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'medium' });
+      const docInsert = await supabaseAdmin.from('corrected_docs').insert({
+        user_id: userId,
+        title: docTitle,
+        content: resultText,
+      });
+      if (docInsert.error) {
+        console.error('corrected_docs insert error:', docInsert.error);
+      }
     }
 
     return res.status(200).json({ result: resultText });

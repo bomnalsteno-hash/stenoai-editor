@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { correctTranscript } from '../services/geminiService';
+import { correctTranscript, correctTranscriptChunked, CHUNK_SIZE } from '../services/geminiService';
 import { ArrowRight, Copy, Sparkles, CheckCheck, FileText, Eraser, Download, Upload } from 'lucide-react';
 
 interface EditorProps {}
@@ -14,6 +14,7 @@ export const Editor: React.FC<EditorProps> = () => {
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<boolean>(false);
   const [inputFileName, setInputFileName] = useState<string | null>(null);
+  const [chunkProgress, setChunkProgress] = useState<{ current: number; total: number } | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
@@ -66,16 +67,26 @@ export const Editor: React.FC<EditorProps> = () => {
     setIsProcessing(true);
     setError(null);
     setOutputText('');
+    setChunkProgress(null);
 
     try {
       if (!session?.access_token) throw new Error('로그인이 필요합니다.');
       const filenameToSend = inputFileNameRef.current ?? inputFileName;
-      const result = await correctTranscript(inputText, session.access_token, filenameToSend);
+      const useChunked = inputText.length > CHUNK_SIZE;
+      const result = useChunked
+        ? await correctTranscriptChunked(
+            inputText,
+            session.access_token,
+            filenameToSend,
+            (current, total) => setChunkProgress({ current, total })
+          )
+        : await correctTranscript(inputText, session.access_token, filenameToSend);
       setOutputText(result);
     } catch (err: any) {
       setError(err.message || "교정 중 오류가 발생했습니다. 다시 시도해주세요.");
     } finally {
       setIsProcessing(false);
+      setChunkProgress(null);
     }
   }, [inputText, session?.access_token, inputFileName]);
 
@@ -131,7 +142,10 @@ export const Editor: React.FC<EditorProps> = () => {
             {isProcessing ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>교정 중...</span>
+                <span>
+                  교정 중...
+                  {chunkProgress ? ` (${chunkProgress.current}/${chunkProgress.total})` : ''}
+                </span>
               </>
             ) : (
               <>
@@ -217,7 +231,9 @@ export const Editor: React.FC<EditorProps> = () => {
               <div className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-white/50 backdrop-blur-sm">
                 <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4" />
                 <p className="text-slate-500 text-sm font-medium animate-pulse">전문가가 교정 중입니다...</p>
-                <p className="text-slate-400 text-xs mt-2">문맥 파악 및 오류 수정 중</p>
+                <p className="text-slate-400 text-xs mt-2">
+                  {chunkProgress ? `${chunkProgress.current}/${chunkProgress.total} 구간 교정 중` : '문맥 파악 및 오류 수정 중'}
+                </p>
               </div>
             ) : null}
 
