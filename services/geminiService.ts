@@ -1,7 +1,7 @@
 const API_BASE = import.meta.env.VITE_APP_URL ?? '';
 
-/** 한 번에 API로 보낼 최대 글자 수. 이보다 길면 자동으로 잘라서 여러 번 요청 후 합침. */
-export const CHUNK_SIZE = 3500;
+/** 한 번에 API로 보낼 최대 글자 수. 이보다 길면 자동으로 잘라서 여러 번 요청 후 합침. (타임아웃 방지로 2500) */
+export const CHUNK_SIZE = 2500;
 
 export const correctTranscript = async (
   draftText: string,
@@ -25,14 +25,23 @@ export const correctTranscript = async (
     const isLatin1 = [...name].every((c) => c.charCodeAt(0) <= 255);
     if (isLatin1) headers['X-Input-Filename'] = name;
   }
-  const res = await fetch(`${API_BASE}/api/correct`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ text: draftText, filename: filename ?? undefined }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error ?? '교정 요청에 실패했습니다.');
-  return data.result ?? '';
+  const run = async (isRetry: boolean): Promise<string> => {
+    const res = await fetch(`${API_BASE}/api/correct`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ text: draftText, filename: filename ?? undefined }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 504 && !isRetry) {
+        await new Promise((r) => setTimeout(r, 2000));
+        return run(true);
+      }
+      throw new Error(data.error ?? '교정 요청에 실패했습니다.');
+    }
+    return data.result ?? '';
+  };
+  return run(false);
 };
 
 /** maxLen 이내에서 줄바꿈·공백 등 자연스러운 끊김으로 잘라서 청크 배열 반환 */
