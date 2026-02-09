@@ -15,6 +15,7 @@ export const Editor: React.FC<EditorProps> = () => {
   const [dragOver, setDragOver] = useState<boolean>(false);
   const [inputFileName, setInputFileName] = useState<string | null>(null);
   const [chunkProgress, setChunkProgress] = useState<{ current: number; total: number } | null>(null);
+  const [remainingText, setRemainingText] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
@@ -62,33 +63,55 @@ export const Editor: React.FC<EditorProps> = () => {
   }, []);
 
   const handleCorrect = useCallback(async () => {
-    if (!inputText.trim()) return;
+    const baseText = (remainingText ?? inputText).trim();
+    if (!baseText) return;
 
     setIsProcessing(true);
     setError(null);
-    setOutputText('');
+    // 이어서 교정하는 경우에는 이미 나온 결과는 유지하고, 처음부터 시작할 때만 초기화
+    if (!remainingText) {
+      setOutputText('');
+    }
     setChunkProgress(null);
 
     try {
       if (!session?.access_token) throw new Error('로그인이 필요합니다.');
       const filenameToSend = inputFileNameRef.current ?? inputFileName;
-      const useChunked = inputText.length > CHUNK_SIZE;
+      const useChunked = baseText.length > CHUNK_SIZE;
       const result = useChunked
         ? await correctTranscriptChunked(
-            inputText,
+            baseText,
             session.access_token,
             filenameToSend,
             (current, total) => setChunkProgress({ current, total })
           )
         : await correctTranscript(inputText, session.access_token, filenameToSend);
-      setOutputText(result);
+      // 모든 구간이 성공적으로 끝난 경우: 이어서 모드였다면 기존 결과 뒤에 붙이고, 아니면 전체 교정 결과로 사용
+      if (remainingText && outputText) {
+        const sep = outputText.endsWith('\n') || result.startsWith('\n') ? '' : '\n\n';
+        setOutputText(outputText + sep + result);
+      } else {
+        setOutputText(result);
+      }
+      setRemainingText(null);
     } catch (err: any) {
-      setError(err.message || "교정 중 오류가 발생했습니다. 다시 시도해주세요.");
+      if (err?.partialResult) {
+        // 청크 모드에서 일부 구간까지만 성공한 경우, 해당 부분이라도 결과 영역에 이어서 표시
+        setOutputText((prev) => {
+          if (!prev) return err.partialResult;
+          const sep = prev.endsWith('\n') || String(err.partialResult).startsWith('\n') ? '' : '\n\n';
+          return prev + sep + err.partialResult;
+        });
+        if (err.remainingText) {
+          setRemainingText(String(err.remainingText));
+        }
+      }
+      setError(err.message || '교정 중 오류가 발생했습니다. 다시 시도해주세요.');
     } finally {
       setIsProcessing(false);
       setChunkProgress(null);
     }
-  }, [inputText, session?.access_token, inputFileName]);
+  }, [inputText, remainingText, session?.access_token, inputFileName, outputText]);
 
   const handleCopy = useCallback(() => {
     if (!outputText) return;
@@ -103,6 +126,7 @@ export const Editor: React.FC<EditorProps> = () => {
       setOutputText('');
       setError(null);
       setInputFileName(null);
+      setRemainingText(null);
     }
   }, []);
 

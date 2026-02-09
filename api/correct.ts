@@ -296,6 +296,17 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({ result: resultText });
   } catch (err: any) {
     console.error('correct API error:', err);
-    return res.status(500).json({ error: err.message ?? '교정 중 오류가 발생했습니다.' });
+    const msg = err?.message ?? '';
+    const status = err?.status ?? err?.response?.status;
+    const isOverloaded =
+      status === 503 ||
+      /overload|503|UNAVAILABLE/i.test(msg) ||
+      (typeof err?.response?.data === 'object' && err?.response?.data?.error?.status === 'UNAVAILABLE');
+    if (isOverloaded) {
+      return res.status(503).json({
+        error: 'AI 서버가 일시적으로 바쁩니다. 잠시 후 다시 시도해주세요.',
+      });
+    }
+    return res.status(500).json({ error: msg || '교정 중 오류가 발생했습니다.' });
   }
 }

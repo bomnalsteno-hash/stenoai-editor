@@ -25,6 +25,7 @@ export const correctTranscript = async (
     const isLatin1 = [...name].every((c) => c.charCodeAt(0) <= 255);
     if (isLatin1) headers['X-Input-Filename'] = name;
   }
+  const OVERLOADED_MSG = 'AI 서버가 일시적으로 바쁩니다. 잠시 후 다시 시도해주세요.';
   const run = async (isRetry: boolean): Promise<string> => {
     const res = await fetch(`${API_BASE}/api/correct`, {
       method: 'POST',
@@ -33,11 +34,19 @@ export const correctTranscript = async (
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      const errText = data.error ?? '';
+      const isOverloaded =
+        res.status === 503 || (typeof errText === 'string' && /overload|바쁩니다/i.test(errText));
+      if (isOverloaded && !isRetry) {
+        await new Promise((r) => setTimeout(r, 7000));
+        return run(true);
+      }
+      if (isOverloaded) throw new Error(OVERLOADED_MSG);
       if (res.status === 504 && !isRetry) {
         await new Promise((r) => setTimeout(r, 2000));
         return run(true);
       }
-      throw new Error(data.error ?? '교정 요청에 실패했습니다.');
+      throw new Error(typeof errText === 'string' ? errText : '교정 요청에 실패했습니다.');
     }
     return data.result ?? '';
   };
@@ -100,14 +109,34 @@ export const correctTranscriptChunked = async (
   const batchId = crypto.randomUUID();
   const results: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
-    onProgress?.(i + 1, chunks.length);
-    const result = await correctTranscript(chunks[i], accessToken, i === 0 ? filename : null, {
-      skipSave: true,
-      batchId,
-      chunkIndex: i,
-      chunkTotal: chunks.length,
-    });
-    results.push(result);
+    try {
+      onProgress?.(i + 1, chunks.length);
+      const result = await correctTranscript(chunks[i], accessToken, i === 0 ? filename : null, {
+        skipSave: true,
+        batchId,
+        chunkIndex: i,
+        chunkTotal: chunks.length,
+      });
+      results.push(result);
+    } catch (err: any) {
+      // 일부 청크까지만 성공한 경우, 이미 완료된 구간까지의 결과를 포함해서 에러를 래핑
+      if (results.length > 0) {
+        const partial = results.join('\n\n');
+        const remainingChunks = chunks.slice(results.length);
+        const remainingText = remainingChunks.join('\n\n');
+        const baseMessage = err?.message ?? '교정 중 오류가 발생했습니다.';
+        const wrapped: any = new Error(
+          `일부 구간까지만 교정되었습니다. (${results.length}/${chunks.length} 구간 완료) 원인: ${baseMessage}`
+        );
+        wrapped.partialResult = partial;
+        wrapped.completedChunks = results.length;
+        wrapped.totalChunks = chunks.length;
+        wrapped.remainingText = remainingText;
+        throw wrapped;
+      }
+      // 첫 번째 청크에서 바로 실패한 경우에는 기존 에러를 그대로 던짐
+      throw err;
+    }
   }
 
   return results.join('\n\n');
