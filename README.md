@@ -29,6 +29,7 @@
    - SQL Editor에서 [supabase/schema.sql](supabase/schema.sql) 실행
    - 관리자 로그에서 **파일명**이 보이게 하려면 [supabase/add-filename-column.sql](supabase/add-filename-column.sql) 도 실행
    - **마이페이지**에 교정본 저장을 쓰려면 [supabase/corrected-docs-table.sql](supabase/corrected-docs-table.sql) 도 실행
+   - 긴 텍스트 청크 교정 시 **관리자 페이지에서 한 파일당 한 건**으로 보이게 하려면 [supabase/add-batch-id-column.sql](supabase/add-batch-id-column.sql) 도 실행
    - Settings → API 에서 **URL**, **anon key**, **service_role key** 복사
 
 2. **관리자 지정**
@@ -47,6 +48,28 @@
    - Vercel에서 배포 URL이 `https://xxx.vercel.app` 이면, 같은 도메인에서 API를 쓰므로 `VITE_APP_URL` 은 비워두면 됨.
    - 다른 도메인에서 API를 호출할 경우에만 `VITE_APP_URL` 에 API 기준 URL 설정
 
+## 브랜치·배포 흐름
+
+- **`main`**: 공개용 안정 버전. 사용자에게 보이는 주소는 이 브랜치 기준으로 배포한다.
+- **`develop`**: 비공개 개발용. 여기서 수정·푸시하면 Preview URL로만 배포되며, 공개 주소는 바뀌지 않는다.
+- **v2가 안정되면**: `develop`을 `main`에 머지한 뒤 `main`을 푸시하면 공개 버전이 v2로 갱신된다.
+
+**기본 배포 규칙**: 사용자가 "메인으로 배포해줘"라고 요청하기 전까지, 수정사항은 **항상 `develop` 브랜치에만** 커밋·푸시한다. (`main`에는 푸시하지 않음.)
+
+```bash
+# 평소 개발 (비공개 주소만 갱신)
+git checkout develop
+git add . && git commit -m "메시지"
+git push origin develop
+
+# v2를 공개 버전으로 올릴 때
+git checkout main
+git merge develop
+git push origin main
+```
+
+- **태그**: 현재 공개 버전은 `v1.0-public` 태그로 기억해 두었다. 나중에 `git checkout v1.0-public` 로 그 시점으로 돌아갈 수 있다.
+
 ## GitHub 푸시
 
 ```bash
@@ -55,4 +78,4 @@ git commit -m "메시지"
 git push
 ```
 
-Vercel과 GitHub를 연동해 두면 `main` 브랜치 푸시 시 자동 배포됩니다.
+Vercel과 GitHub를 연동해 두면 `main` 브랜치 푸시 시 **공개** 배포, `develop` 푸시 시 **Preview** 배포만 된다.

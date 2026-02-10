@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { correctTranscript } from '../services/geminiService';
+import { correctTranscript, correctTranscriptChunked, CHUNK_SIZE } from '../services/geminiService';
 import { ArrowRight, Copy, Sparkles, CheckCheck, FileText, Eraser, Download, Upload } from 'lucide-react';
 
 interface EditorProps {}
@@ -14,6 +14,8 @@ export const Editor: React.FC<EditorProps> = () => {
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<boolean>(false);
   const [inputFileName, setInputFileName] = useState<string | null>(null);
+  const [chunkProgress, setChunkProgress] = useState<{ current: number; total: number } | null>(null);
+  const [remainingText, setRemainingText] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
@@ -61,23 +63,55 @@ export const Editor: React.FC<EditorProps> = () => {
   }, []);
 
   const handleCorrect = useCallback(async () => {
-    if (!inputText.trim()) return;
+    const baseText = (remainingText ?? inputText).trim();
+    if (!baseText) return;
 
     setIsProcessing(true);
     setError(null);
-    setOutputText('');
+    // 이어서 교정하는 경우에는 이미 나온 결과는 유지하고, 처음부터 시작할 때만 초기화
+    if (!remainingText) {
+      setOutputText('');
+    }
+    setChunkProgress(null);
 
     try {
       if (!session?.access_token) throw new Error('로그인이 필요합니다.');
       const filenameToSend = inputFileNameRef.current ?? inputFileName;
-      const result = await correctTranscript(inputText, session.access_token, filenameToSend);
-      setOutputText(result);
+      const useChunked = baseText.length > CHUNK_SIZE;
+      const result = useChunked
+        ? await correctTranscriptChunked(
+            baseText,
+            session.access_token,
+            filenameToSend,
+            (current, total) => setChunkProgress({ current, total })
+          )
+        : await correctTranscript(inputText, session.access_token, filenameToSend);
+      // 모든 구간이 성공적으로 끝난 경우: 이어서 모드였다면 기존 결과 뒤에 붙이고, 아니면 전체 교정 결과로 사용
+      if (remainingText && outputText) {
+        const sep = outputText.endsWith('\n') || result.startsWith('\n') ? '' : '\n\n';
+        setOutputText(outputText + sep + result);
+      } else {
+        setOutputText(result);
+      }
+      setRemainingText(null);
     } catch (err: any) {
-      setError(err.message || "교정 중 오류가 발생했습니다. 다시 시도해주세요.");
+      if (err?.partialResult) {
+        // 청크 모드에서 일부 구간까지만 성공한 경우, 해당 부분이라도 결과 영역에 이어서 표시
+        setOutputText((prev) => {
+          if (!prev) return err.partialResult;
+          const sep = prev.endsWith('\n') || String(err.partialResult).startsWith('\n') ? '' : '\n\n';
+          return prev + sep + err.partialResult;
+        });
+        if (err.remainingText) {
+          setRemainingText(String(err.remainingText));
+        }
+      }
+      setError(err.message || '교정 중 오류가 발생했습니다. 다시 시도해주세요.');
     } finally {
       setIsProcessing(false);
+      setChunkProgress(null);
     }
-  }, [inputText, session?.access_token, inputFileName]);
+  }, [inputText, remainingText, session?.access_token, inputFileName, outputText]);
 
   const handleCopy = useCallback(() => {
     if (!outputText) return;
@@ -92,6 +126,7 @@ export const Editor: React.FC<EditorProps> = () => {
       setOutputText('');
       setError(null);
       setInputFileName(null);
+      setRemainingText(null);
     }
   }, []);
 
@@ -131,12 +166,15 @@ export const Editor: React.FC<EditorProps> = () => {
             {isProcessing ? (
               <>
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>교정 중...</span>
+                <span>
+                  {remainingText ? '이어 교정 중...' : '교정 중...'}
+                  {chunkProgress ? ` (${chunkProgress.current}/${chunkProgress.total})` : ''}
+                </span>
               </>
             ) : (
               <>
                 <Sparkles size={16} />
-                <span>AI 교정 시작</span>
+                <span>{remainingText ? '이어서 교정하기' : 'AI 교정 시작'}</span>
               </>
             )}
           </button>
@@ -217,7 +255,9 @@ export const Editor: React.FC<EditorProps> = () => {
               <div className="absolute inset-0 flex flex-col items-center justify-center z-20 bg-white/50 backdrop-blur-sm">
                 <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4" />
                 <p className="text-slate-500 text-sm font-medium animate-pulse">전문가가 교정 중입니다...</p>
-                <p className="text-slate-400 text-xs mt-2">문맥 파악 및 오류 수정 중</p>
+                <p className="text-slate-400 text-xs mt-2">
+                  {chunkProgress ? `${chunkProgress.current}/${chunkProgress.total} 구간 교정 중` : '문맥 파악 및 오류 수정 중'}
+                </p>
               </div>
             ) : null}
 
