@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { correctTranscript, correctTranscriptChunked, CHUNK_SIZE } from '../services/geminiService';
 import { ArrowRight, Copy, Sparkles, CheckCheck, FileText, Eraser, Download, Upload } from 'lucide-react';
@@ -16,10 +16,38 @@ export const Editor: React.FC<EditorProps> = () => {
   const [inputFileName, setInputFileName] = useState<string | null>(null);
   const [chunkProgress, setChunkProgress] = useState<{ current: number; total: number } | null>(null);
   const [remainingText, setRemainingText] = useState<string | null>(null);
+  const [autoMode, setAutoMode] = useState<boolean>(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
   inputFileNameRef.current = inputFileName;
+
+  const remainingTextRef = useRef<string | null>(null);
+  remainingTextRef.current = remainingText;
+
+  const autoModeRef = useRef<boolean>(false);
+  autoModeRef.current = autoMode;
+
+  // 브라우저 알림 권한 요청 (최초 1회, 가능할 때만)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => undefined);
+    }
+  }, []);
+
+  const notifyWhenHidden = useCallback((title: string, body: string) => {
+    if (typeof window === 'undefined') return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    if (document.visibilityState === 'visible') return;
+    try {
+      new Notification(title, { body });
+    } catch {
+      // 일부 브라우저에서 예외가 날 수 있으므로 조용히 무시
+    }
+  }, []);
 
   const handleDownload = useCallback(() => {
     if (!outputText) return;
@@ -113,6 +141,56 @@ export const Editor: React.FC<EditorProps> = () => {
     }
   }, [inputText, remainingText, session?.access_token, inputFileName, outputText]);
 
+  const handleStartAuto = useCallback(async () => {
+    if (isProcessing || autoMode) return;
+    const baseText = (remainingText ?? inputText).trim();
+    if (!baseText) return;
+    setAutoMode(true);
+    await handleCorrect();
+  }, [autoMode, handleCorrect, inputText, isProcessing, remainingText]);
+
+  const handleStopAuto = useCallback(() => {
+    setAutoMode(false);
+  }, []);
+
+  // 자동 모드일 때, 남은 텍스트가 있으면 알아서 다음 턴을 이어서 실행
+  useEffect(() => {
+    if (!autoModeRef.current) return;
+    if (isProcessing) return;
+    const baseText = (remainingTextRef.current ?? inputText).trim();
+    if (!baseText) {
+      setAutoMode(false);
+      return;
+    }
+    if (remainingTextRef.current) {
+      // 다음 턴을 살짝 텀을 두고 이어서 실행
+      const id = window.setTimeout(() => {
+        if (autoModeRef.current) {
+          handleCorrect();
+        }
+      }, 2000);
+      return () => window.clearTimeout(id);
+    } else {
+      // 더 남은 텍스트가 없으면 자동 모드 종료
+      setAutoMode(false);
+    }
+  }, [autoModeRef, handleCorrect, inputText, isProcessing, remainingTextRef]);
+
+  // 한 턴이 끝날 때(처리 중 -> 대기 상태로 바뀔 때) 백그라운드 탭이라면 브라우저 알림
+  const prevProcessingRef = useRef<boolean>(false);
+  useEffect(() => {
+    const wasProcessing = prevProcessingRef.current;
+    prevProcessingRef.current = isProcessing;
+    if (wasProcessing && !isProcessing) {
+      // 턴 종료 시점
+      if (!remainingTextRef.current) {
+        notifyWhenHidden('StenoAI 교정 완료', '교정이 완료되었습니다. 결과를 확인해 주세요.');
+      } else if (!autoModeRef.current) {
+        notifyWhenHidden('StenoAI 일부 교정 완료', '일부 구간까지만 교정되었습니다. 이어서 교정하기를 눌러주세요.');
+      }
+    }
+  }, [isProcessing, notifyWhenHidden]);
+
   const handleCopy = useCallback(() => {
     if (!outputText) return;
     navigator.clipboard.writeText(outputText);
@@ -153,7 +231,7 @@ export const Editor: React.FC<EditorProps> = () => {
           )}
           <button
             onClick={handleCorrect}
-            disabled={isProcessing || !inputText.trim()}
+            disabled={isProcessing || !inputText.trim() || autoMode}
             className={`
               flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold text-white shadow-md transition-all
               ${isProcessing 
@@ -177,6 +255,20 @@ export const Editor: React.FC<EditorProps> = () => {
                 <span>{remainingText ? '이어서 교정하기' : 'AI 교정 시작'}</span>
               </>
             )}
+          </button>
+          <button
+            onClick={autoMode ? handleStopAuto : handleStartAuto}
+            disabled={isProcessing || !inputText.trim()}
+            className={`
+              flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold border transition-all
+              ${
+                autoMode
+                  ? 'border-rose-300 text-rose-600 bg-rose-50 hover:bg-rose-100'
+                  : 'border-indigo-200 text-indigo-600 bg-white hover:bg-indigo-50'
+              }
+            `}
+          >
+            {autoMode ? '자동 교정 중지' : '끝까지 자동 교정'}
           </button>
         </div>
       </div>
