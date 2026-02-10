@@ -10,7 +10,7 @@ export const correctTranscript = async (
   draftText: string,
   accessToken: string,
   filename?: string | null,
-  options?: { skipSave?: boolean; batchId?: string; chunkIndex?: number; chunkTotal?: number }
+  options?: { skipSave?: boolean; batchId?: string; chunkIndex?: number; chunkTotal?: number; signal?: AbortSignal }
 ): Promise<string> => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -31,7 +31,21 @@ export const correctTranscript = async (
   const OVERLOADED_MSG = 'AI 서버가 일시적으로 바쁩니다. 잠시 후 다시 시도해주세요.';
   const run = async (isRetry: boolean): Promise<string> => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, CLIENT_TIMEOUT_MS);
+
+    // 외부에서 전달된 signal과 내부 controller를 연결
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        controller.abort();
+      } else {
+        const onAbort = () => controller.abort();
+        options.signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
     try {
       const res = await fetch(`${API_BASE}/api/correct`, {
         method: 'POST',
@@ -58,7 +72,12 @@ export const correctTranscript = async (
       return data.result ?? '';
     } catch (err: any) {
       if (err?.name === 'AbortError') {
-        throw new Error('AI 응답이 120초 이상 지연되어 중단했습니다. 된 부분까지만 확인한 뒤 잠시 후 다시 시도해주세요.');
+        // 내부 타임아웃에 의한 중단인 경우에만 사용자용 메시지로 변환
+        if (timedOut) {
+          throw new Error('AI 응답이 120초 이상 지연되어 중단했습니다. 된 부분까지만 확인한 뒤 잠시 후 다시 시도해주세요.');
+        }
+        // 외부(사용자 취소 등)에서 abort 한 경우에는 그대로 전달해 상위에서 처리
+        throw err;
       }
       throw err;
     } finally {
@@ -113,12 +132,13 @@ export const correctTranscriptChunked = async (
   draftText: string,
   accessToken: string,
   filename: string | null | undefined,
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (current: number, total: number) => void,
+  options?: { signal?: AbortSignal }
 ): Promise<string> => {
   const chunks = splitIntoChunks(draftText, CHUNK_SIZE);
   if (chunks.length === 0) return '';
   if (chunks.length === 1) {
-    return correctTranscript(draftText, accessToken, filename);
+    return correctTranscript(draftText, accessToken, filename, options);
   }
 
   const batchId = crypto.randomUUID();
@@ -131,6 +151,7 @@ export const correctTranscriptChunked = async (
         batchId,
         chunkIndex: i,
         chunkTotal: chunks.length,
+        signal: options?.signal,
       });
       results.push(result);
     } catch (err: any) {

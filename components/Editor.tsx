@@ -31,6 +31,8 @@ export const Editor: React.FC<EditorProps> = () => {
   const autoAttemptRef = useRef<number>(0);
   const MAX_AUTO_ATTEMPTS = 10;
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // 브라우저 알림 권한 요청 (최초 1회, 가능할 때만)
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -97,6 +99,11 @@ export const Editor: React.FC<EditorProps> = () => {
     const baseText = (remainingText ?? inputText).trim();
     if (!baseText) return;
 
+    // 이전 요청이 남아 있다면 정리
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsProcessing(true);
     setError(null);
     // 이어서 교정하는 경우에는 이미 나온 결과는 유지하고, 처음부터 시작할 때만 초기화
@@ -114,9 +121,10 @@ export const Editor: React.FC<EditorProps> = () => {
             baseText,
             session.access_token,
             filenameToSend,
-            (current, total) => setChunkProgress({ current, total })
+            (current, total) => setChunkProgress({ current, total }),
+            { signal: controller.signal }
           )
-        : await correctTranscript(inputText, session.access_token, filenameToSend);
+        : await correctTranscript(baseText, session.access_token, filenameToSend, { signal: controller.signal });
       // 모든 구간이 성공적으로 끝난 경우: 이어서 모드였다면 기존 결과 뒤에 붙이고, 아니면 전체 교정 결과로 사용
       if (remainingText && outputText) {
         const sep = outputText.endsWith('\n') || result.startsWith('\n') ? '' : '\n\n';
@@ -126,6 +134,10 @@ export const Editor: React.FC<EditorProps> = () => {
       }
       setRemainingText(null);
     } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        // 사용자 취소 또는 외부 abort의 경우에는 조용히 무시
+        return;
+      }
       if (err?.partialResult) {
         // 청크 모드에서 일부 구간까지만 성공한 경우, 해당 부분이라도 결과 영역에 이어서 표시
         setOutputText((prev) => {
@@ -141,6 +153,7 @@ export const Editor: React.FC<EditorProps> = () => {
     } finally {
       setIsProcessing(false);
       setChunkProgress(null);
+      abortControllerRef.current = null;
     }
   }, [inputText, remainingText, session?.access_token, inputFileName, outputText]);
 
@@ -157,6 +170,8 @@ export const Editor: React.FC<EditorProps> = () => {
   const handleStopAuto = useCallback(() => {
     setAutoMode(false);
     autoAttemptRef.current = 0;
+    // 현재 진행 중인 요청이 있다면 취소
+    abortControllerRef.current?.abort();
   }, []);
 
   // 자동 모드일 때, 실패하거나 일부만 교정된 경우 남은 텍스트가 있으면 알아서 다음 턴을 이어서 실행
