@@ -28,6 +28,9 @@ export const Editor: React.FC<EditorProps> = () => {
   const autoModeRef = useRef<boolean>(false);
   autoModeRef.current = autoMode;
 
+  const autoAttemptRef = useRef<number>(0);
+  const MAX_AUTO_ATTEMPTS = 10;
+
   // 브라우저 알림 권한 요청 (최초 1회, 가능할 때만)
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -146,35 +149,49 @@ export const Editor: React.FC<EditorProps> = () => {
     const baseText = (remainingText ?? inputText).trim();
     if (!baseText) return;
     setAutoMode(true);
+    autoAttemptRef.current = 0;
+    setError(null);
     await handleCorrect();
   }, [autoMode, handleCorrect, inputText, isProcessing, remainingText]);
 
   const handleStopAuto = useCallback(() => {
     setAutoMode(false);
+    autoAttemptRef.current = 0;
   }, []);
 
-  // 자동 모드일 때, 남은 텍스트가 있으면 알아서 다음 턴을 이어서 실행
+  // 자동 모드일 때, 실패하거나 일부만 교정된 경우 남은 텍스트가 있으면 알아서 다음 턴을 이어서 실행
   useEffect(() => {
     if (!autoModeRef.current) return;
     if (isProcessing) return;
     const baseText = (remainingTextRef.current ?? inputText).trim();
-    if (!baseText) {
+    const hasRemaining = !!baseText;
+
+    if (!autoModeRef.current) return;
+
+    // 남은 텍스트가 없으면 자동 모드 종료
+    if (!hasRemaining) {
       setAutoMode(false);
+      autoAttemptRef.current = 0;
       return;
     }
-    if (remainingTextRef.current) {
-      // 다음 턴을 살짝 텀을 두고 이어서 실행
-      const id = window.setTimeout(() => {
-        if (autoModeRef.current) {
-          handleCorrect();
-        }
-      }, 2000);
-      return () => window.clearTimeout(id);
-    } else {
-      // 더 남은 텍스트가 없으면 자동 모드 종료
+
+    // 재시도 한도 초과 시 자동 모드 종료
+    if (autoAttemptRef.current >= MAX_AUTO_ATTEMPTS) {
       setAutoMode(false);
+      autoAttemptRef.current = 0;
+      return;
     }
-  }, [autoModeRef, handleCorrect, inputText, isProcessing, remainingTextRef]);
+
+    // 다음 턴을 살짝 텀을 두고 자동 실행 (부분 성공이든 전체 실패든 남은 텍스트가 있으면 재시도)
+    const id = window.setTimeout(() => {
+      if (!autoModeRef.current) return;
+      autoAttemptRef.current += 1;
+      setError(null);
+      handleCorrect();
+    }, 2000);
+
+    return () => window.clearTimeout(id);
+  }, [handleCorrect, inputText, isProcessing]);
 
   // 한 턴이 끝날 때(처리 중 -> 대기 상태로 바뀔 때) 백그라운드 탭이라면 브라우저 알림
   const prevProcessingRef = useRef<boolean>(false);
