@@ -290,7 +290,7 @@ export const Editor: React.FC<EditorProps> = () => {
           </button>
           <button
             onClick={autoMode ? handleStopAuto : handleStartAuto}
-            disabled={isProcessing || !inputText.trim()}
+            disabled={(!autoMode && isProcessing) || !inputText.trim()}
             className={`
               flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold border transition-all
               ${
