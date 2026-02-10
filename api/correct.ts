@@ -238,6 +238,7 @@ export default async function handler(req: any, res: any) {
         user_id: userId,
         title: docTitle,
         content: resultText,
+        original_content: text,
       });
       if (docInsert.error) {
         console.error('corrected_docs insert error:', docInsert.error);
