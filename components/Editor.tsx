@@ -292,7 +292,7 @@ export const Editor: React.FC<EditorProps> = () => {
             onClick={autoMode ? handleStopAuto : handleStartAuto}
             disabled={(!autoMode && isProcessing) || !inputText.trim()}
             className={`
-              flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold border transition-all
+              flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer disabled:cursor-not-allowed
               ${
                 autoMode
                   ? 'border-rose-300 text-rose-600 bg-rose-50 hover:bg-rose-100'
