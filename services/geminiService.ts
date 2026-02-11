@@ -83,6 +83,45 @@ export const correctTranscript = async (
   return run(false);
 };
 
+/** 긴 텍스트 교정이 모두 끝난 뒤, 최종 결과만 Supabase(corrected_docs)에 저장하는 전용 호출 */
+export const saveFinalCorrectedDoc = async (
+  originalText: string,
+  correctedText: string,
+  accessToken: string,
+  filename?: string | null
+): Promise<void> => {
+  const trimmed = correctedText.trim();
+  if (!trimmed) return;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${accessToken}`,
+  };
+
+  if (filename && typeof filename === 'string' && filename.trim()) {
+    const name = filename.trim();
+    const isLatin1 = [...name].every((c) => c.charCodeAt(0) <= 255);
+    if (isLatin1) headers['X-Input-Filename'] = name;
+  }
+
+  const res = await fetch(`${API_BASE}/api/correct`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      mode: 'save-only',
+      originalText,
+      correctedText: trimmed,
+      filename: filename ?? undefined,
+    }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const msg = typeof (data as any).error === 'string' ? (data as any).error : '교정 결과 저장에 실패했습니다.';
+    throw new Error(msg);
+  }
+};
+
 function isTimeoutError(err: any): boolean {
   const msg = String(err?.message ?? '');
   return /timeout/i.test(msg) || /timed out/i.test(msg);
@@ -204,5 +243,15 @@ export const correctTranscriptChunked = async (
     }
   }
 
-  return results.join('\n\n');
+  const finalResult = results.join('\n\n');
+
+  // 청크 방식으로 전체 교정이 성공적으로 끝난 경우에만 MyPage용으로 한 번 저장
+  try {
+    await saveFinalCorrectedDoc(draftText, finalResult, accessToken, filename ?? null);
+  } catch (e) {
+    // 저장 실패는 교정 결과 반환에는 영향 주지 않음 (콘솔에만 기록)
+    console.error('saveFinalCorrectedDoc error:', e);
+  }
+
+  return finalResult;
 };

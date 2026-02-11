@@ -129,11 +129,49 @@ export default async function handler(req: any, res: any) {
   if (!userId) return res.status(401).json({ error: '유효하지 않은 세션입니다.' });
 
   const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
-  const text = body.text?.trim();
-  if (!text) return res.status(400).json({ error: '텍스트가 없습니다.' });
+  const mode = typeof body.mode === 'string' ? body.mode : 'correct';
   const headerFilename = req.headers?.['x-input-filename'];
   const bodyFilename = typeof body.filename === 'string' ? body.filename.trim() || null : null;
   const inputFilename = bodyFilename ?? (typeof headerFilename === 'string' ? headerFilename.trim() || null : null);
+
+  // 1) 최종 결과만 저장하는 전용 모드 (AI 호출 없이 DB에만 기록)
+  if (mode === 'save-only') {
+    const correctedText = typeof body.correctedText === 'string' ? body.correctedText.trim() : '';
+    const originalText = typeof body.originalText === 'string' ? body.originalText.trim() : null;
+    if (!correctedText) {
+      return res.status(400).json({ error: '저장할 결과 텍스트가 없습니다.' });
+    }
+
+    try {
+      const supabaseAdmin = createClient(
+        process.env.SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+      const docTitle =
+        (typeof inputFilename === 'string' && inputFilename.trim())
+          ? inputFilename.trim()
+          : new Date().toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'medium' });
+
+      const insertResult = await supabaseAdmin.from('corrected_docs').insert({
+        user_id: userId,
+        title: docTitle,
+        content: correctedText,
+        original_content: originalText,
+      });
+      if (insertResult.error) {
+        console.error('corrected_docs insert error (save-only):', insertResult.error);
+        return res.status(500).json({ error: '교정 결과 저장 중 오류가 발생했습니다.' });
+      }
+      return res.status(200).json({ ok: true });
+    } catch (err: any) {
+      console.error('save-only mode error:', err);
+      return res.status(500).json({ error: '교정 결과 저장 중 오류가 발생했습니다.' });
+    }
+  }
+
+  // 2) 기본 모드: AI 호출 + usage_logs/corrected_docs 기록
+  const text = body.text?.trim();
+  if (!text) return res.status(400).json({ error: '텍스트가 없습니다.' });
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return res.status(500).json({ error: '서버 설정 오류입니다.' });
