@@ -43,7 +43,7 @@ export const Editor: React.FC<EditorProps> = () => {
   const [remainingText, setRemainingText] = useState<string | null>(null);
   const [autoMode, setAutoMode] = useState<boolean>(false);
   const [elapsedSec, setElapsedSec] = useState<number>(0);
-  const [model, setModel] = useState<GeminiModelId>('gemini-2.5-flash');
+  const [model, setModel] = useState<GeminiModelId>('gemini-2.5-pro');
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
@@ -415,7 +415,7 @@ export const Editor: React.FC<EditorProps> = () => {
               ref={textareaRef}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="여기에 음성 인식(STT) 초안 텍스트를 붙여넣거나, TXT 파일을 드래그 앤 드롭하세요..."
+              placeholder="여기에 음성 인식(STT) 초안 텍스트를 붙여넣거나, TXT 파일을 드래그 앤 드롭하세요. (줄바꿈을 하지 않은 원본 텍스트를 넣어주세요.)"
               className="w-full h-full p-6 resize-none focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500/10 bg-white text-slate-700 leading-relaxed text-base font-sans rounded-lg"
               spellCheck={false}
             />
@@ -424,6 +424,7 @@ export const Editor: React.FC<EditorProps> = () => {
                 <div className="text-center">
                   <Upload className="w-12 h-12 mx-auto mb-2 opacity-20" />
                   <p className="text-sm">텍스트 입력·붙여넣기 또는 TXT 파일 드래그 앤 드롭</p>
+                  <p className="text-xs mt-1">줄바꿈을 하지 않은 원본 텍스트를 넣어주세요.</p>
                 </div>
               </div>
             )}
