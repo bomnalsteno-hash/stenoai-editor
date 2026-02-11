@@ -7,6 +7,7 @@ interface EditorProps {}
 
 export const Editor: React.FC<EditorProps> = () => {
   const { session } = useAuth();
+  const MAX_WAIT_SECONDS = 600;
   const [inputText, setInputText] = useState<string>('');
   const [outputText, setOutputText] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -17,6 +18,7 @@ export const Editor: React.FC<EditorProps> = () => {
   const [chunkProgress, setChunkProgress] = useState<{ current: number; total: number } | null>(null);
   const [remainingText, setRemainingText] = useState<string | null>(null);
   const [autoMode, setAutoMode] = useState<boolean>(false);
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
@@ -32,6 +34,27 @@ export const Editor: React.FC<EditorProps> = () => {
   const MAX_AUTO_ATTEMPTS = 10;
 
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // 교정 경과 시간(초) 표시
+  useEffect(() => {
+    if (!isProcessing) return;
+    setElapsedSec(0);
+    const id = window.setInterval(() => {
+      setElapsedSec((prev) => Math.min(MAX_WAIT_SECONDS, prev + 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [isProcessing]);
+
+  const percent =
+    chunkProgress && chunkProgress.total > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(((Math.max(0, chunkProgress.current - 1) / chunkProgress.total) * 100))
+          )
+        )
+      : null;
 
   // 브라우저 알림 권한 요청 (최초 1회, 가능할 때만)
   useEffect(() => {
@@ -382,6 +405,22 @@ export const Editor: React.FC<EditorProps> = () => {
                 <p className="text-slate-400 text-xs mt-2">
                   {chunkProgress ? `${chunkProgress.current}/${chunkProgress.total} 구간 교정 중` : '문맥 파악 및 오류 수정 중'}
                 </p>
+                <div className="mt-3 w-72 max-w-[80vw]">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <span>경과: {elapsedSec}s / {MAX_WAIT_SECONDS}s</span>
+                    <span>
+                      {chunkProgress ? `${Math.min(chunkProgress.current, chunkProgress.total)}/${chunkProgress.total}` : '진행 중'}
+                      {percent != null ? ` (${percent}%)` : ''}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-2 rounded-full bg-slate-200 overflow-hidden">
+                    {percent == null ? (
+                      <div className="h-full w-1/3 bg-indigo-300 animate-pulse" />
+                    ) : (
+                      <div className="h-full bg-indigo-500 transition-all" style={{ width: `${percent}%` }} />
+                    )}
+                  </div>
+                </div>
               </div>
             ) : null}
 
