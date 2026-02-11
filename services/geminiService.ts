@@ -1,7 +1,7 @@
 const API_BASE = import.meta.env.VITE_APP_URL ?? '';
 
-/** 한 청크/요청당 클라이언트에서 기다릴 최대 시간 (ms). 이 시간을 넘기면 된 부분까지만 보여주고 중단. */
-const CLIENT_TIMEOUT_MS = 120_000; // 120초
+/** 한 청크/요청당 클라이언트에서 기다릴 최대 시간 (ms). */
+const CLIENT_TIMEOUT_MS = 600_000; // 600초
 
 /** 한 번에 API로 보낼 최대 글자 수. 이보다 길면 자동으로 잘라서 여러 번 요청 후 합침. (타임아웃 방지로 2500) */
 export const CHUNK_SIZE = 2500;
@@ -58,10 +58,6 @@ export const correctTranscript = async (
         const errText = data.error ?? '';
         const isOverloaded =
           res.status === 503 || (typeof errText === 'string' && /overload|바쁩니다/i.test(errText));
-        if (isOverloaded && !isRetry) {
-          await new Promise((r) => setTimeout(r, 7000));
-          return run(true);
-        }
         if (isOverloaded) throw new Error(OVERLOADED_MSG);
         if (res.status === 504 && !isRetry) {
           await new Promise((r) => setTimeout(r, 2000));
@@ -74,7 +70,7 @@ export const correctTranscript = async (
       if (err?.name === 'AbortError') {
         // 내부 타임아웃에 의한 중단인 경우에만 사용자용 메시지로 변환
         if (timedOut) {
-          throw new Error('AI 응답이 120초 이상 지연되어 중단했습니다. 된 부분까지만 확인한 뒤 잠시 후 다시 시도해주세요.');
+          throw new Error('AI 응답이 600초 이상 지연되어 중단했습니다. 된 부분까지만 확인한 뒤 잠시 후 다시 시도해주세요.');
         }
         // 외부(사용자 취소 등)에서 abort 한 경우에는 그대로 전달해 상위에서 처리
         throw err;
