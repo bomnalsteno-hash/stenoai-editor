@@ -3,8 +3,8 @@ const API_BASE = import.meta.env.VITE_APP_URL ?? '';
 /** 한 청크/요청당 클라이언트에서 기다릴 최대 시간 (ms). */
 const CLIENT_TIMEOUT_MS = 600_000; // 600초
 
-/** 한 번에 API로 보낼 최대 글자 수. 이보다 길면 자동으로 잘라서 여러 번 요청 후 합침. (타임아웃 방지로 2500) */
-export const CHUNK_SIZE = 2500;
+/** 한 번에 API로 보낼 최대 글자 수. 이보다 길면 자동으로 잘라서 여러 번 요청 후 합침. (타임아웃 완화를 위해 1500) */
+export const CHUNK_SIZE = 1500;
 
 export const correctTranscript = async (
   draftText: string,
