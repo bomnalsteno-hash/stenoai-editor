@@ -1,16 +1,26 @@
 const API_BASE = import.meta.env.VITE_APP_URL ?? '';
 
-/** 한 청크/요청당 클라이언트에서 기다릴 최대 시간 (ms). 이 시간을 넘기면 된 부분까지만 보여주고 중단. */
-const CLIENT_TIMEOUT_MS = 120_000; // 120초
+/** 한 청크/요청당 클라이언트에서 기다릴 최대 시간 (ms). */
+const CLIENT_TIMEOUT_MS = 600_000; // 600초
 
-/** 한 번에 API로 보낼 최대 글자 수. 이보다 길면 자동으로 잘라서 여러 번 요청 후 합침. (타임아웃 방지로 2500) */
-export const CHUNK_SIZE = 2500;
+/** 한 번에 API로 보낼 최대 글자 수. 이보다 길면 자동으로 잘라서 여러 번 요청 후 합침. (타임아웃 완화를 위해 1500) */
+export const CHUNK_SIZE = 1500;
+
+type CorrectOptions = {
+  skipSave?: boolean;
+  batchId?: string;
+  chunkIndex?: number;
+  chunkTotal?: number;
+  signal?: AbortSignal;
+  /** 사용할 Gemini 모델 ID (예: gemini-3-flash-preview, gemini-3-pro-preview). 지정하지 않으면 서버 기본값 사용 */
+  model?: string;
+};
 
 export const correctTranscript = async (
   draftText: string,
   accessToken: string,
   filename?: string | null,
-  options?: { skipSave?: boolean; batchId?: string; chunkIndex?: number; chunkTotal?: number }
+  options?: CorrectOptions
 ): Promise<string> => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -31,12 +41,30 @@ export const correctTranscript = async (
   const OVERLOADED_MSG = 'AI 서버가 일시적으로 바쁩니다. 잠시 후 다시 시도해주세요.';
   const run = async (isRetry: boolean): Promise<string> => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, CLIENT_TIMEOUT_MS);
+
+    // 외부에서 전달된 signal과 내부 controller를 연결
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        controller.abort();
+      } else {
+        const onAbort = () => controller.abort();
+        options.signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
     try {
       const res = await fetch(`${API_BASE}/api/correct`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ text: draftText, filename: filename ?? undefined }),
+        body: JSON.stringify({
+          text: draftText,
+          filename: filename ?? undefined,
+          model: options?.model,
+        }),
         signal: controller.signal,
       });
       const data = await res.json().catch(() => ({}));
@@ -44,10 +72,6 @@ export const correctTranscript = async (
         const errText = data.error ?? '';
         const isOverloaded =
           res.status === 503 || (typeof errText === 'string' && /overload|바쁩니다/i.test(errText));
-        if (isOverloaded && !isRetry) {
-          await new Promise((r) => setTimeout(r, 7000));
-          return run(true);
-        }
         if (isOverloaded) throw new Error(OVERLOADED_MSG);
         if (res.status === 504 && !isRetry) {
           await new Promise((r) => setTimeout(r, 2000));
@@ -58,7 +82,12 @@ export const correctTranscript = async (
       return data.result ?? '';
     } catch (err: any) {
       if (err?.name === 'AbortError') {
-        throw new Error('AI 응답이 120초 이상 지연되어 중단했습니다. 된 부분까지만 확인한 뒤 잠시 후 다시 시도해주세요.');
+        // 내부 타임아웃에 의한 중단인 경우에만 사용자용 메시지로 변환
+        if (timedOut) {
+          throw new Error('AI 응답이 600초 이상 지연되어 중단했습니다. 된 부분까지만 확인한 뒤 잠시 후 다시 시도해주세요.');
+        }
+        // 외부(사용자 취소 등)에서 abort 한 경우에는 그대로 전달해 상위에서 처리
+        throw err;
       }
       throw err;
     } finally {
@@ -67,6 +96,84 @@ export const correctTranscript = async (
   };
   return run(false);
 };
+
+/** 긴 텍스트 교정이 모두 끝난 뒤, 최종 결과만 Supabase(corrected_docs)에 저장하는 전용 호출 */
+export const saveFinalCorrectedDoc = async (
+  originalText: string,
+  correctedText: string,
+  accessToken: string,
+  filename?: string | null
+): Promise<void> => {
+  const trimmed = correctedText.trim();
+  if (!trimmed) return;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${accessToken}`,
+  };
+
+  if (filename && typeof filename === 'string' && filename.trim()) {
+    const name = filename.trim();
+    const isLatin1 = [...name].every((c) => c.charCodeAt(0) <= 255);
+    if (isLatin1) headers['X-Input-Filename'] = name;
+  }
+
+  const res = await fetch(`${API_BASE}/api/correct`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      mode: 'save-only',
+      originalText,
+      correctedText: trimmed,
+      filename: filename ?? undefined,
+    }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const msg = typeof (data as any).error === 'string' ? (data as any).error : '교정 결과 저장에 실패했습니다.';
+    throw new Error(msg);
+  }
+};
+
+function isTimeoutError(err: any): boolean {
+  const msg = String(err?.message ?? '');
+  return /timeout/i.test(msg) || /timed out/i.test(msg);
+}
+
+async function correctWithFallback(
+  text: string,
+  accessToken: string,
+  filename: string | null | undefined,
+  options: CorrectOptions,
+  depth: number = 0
+): Promise<string> {
+  const MAX_DEPTH = 2;
+  const MIN_LEN = 400;
+  try {
+    return await correctTranscript(text, accessToken, filename, options);
+  } catch (err: any) {
+    if (isTimeoutError(err) && depth < MAX_DEPTH && text.length > MIN_LEN) {
+      // 느린 청크: 더 작은 청크로 나눠 재시도
+      const smallerChunks = splitIntoChunks(text, Math.max(Math.floor(text.length / 2), MIN_LEN));
+      const parts: string[] = [];
+      for (let i = 0; i < smallerChunks.length; i++) {
+        const subText = smallerChunks[i];
+        // 하위 청크는 저장/배치 정보 없이 순수 토큰 사용만 (모델과 signal만 전달)
+        const sub = await correctWithFallback(
+          subText,
+          accessToken,
+          i === 0 ? filename : null,
+          { signal: options.signal, model: options.model },
+          depth + 1
+        );
+        parts.push(sub);
+      }
+      return parts.join('\n\n');
+    }
+    throw err;
+  }
+}
 
 /** maxLen 이내에서 줄바꿈·공백 등 자연스러운 끊김으로 잘라서 청크 배열 반환 */
 function splitIntoChunks(text: string, maxLen: number = CHUNK_SIZE): string[] {
@@ -113,12 +220,13 @@ export const correctTranscriptChunked = async (
   draftText: string,
   accessToken: string,
   filename: string | null | undefined,
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (current: number, total: number) => void,
+  options?: { signal?: AbortSignal; model?: string }
 ): Promise<string> => {
   const chunks = splitIntoChunks(draftText, CHUNK_SIZE);
   if (chunks.length === 0) return '';
   if (chunks.length === 1) {
-    return correctTranscript(draftText, accessToken, filename);
+    return correctTranscript(draftText, accessToken, filename, options);
   }
 
   const batchId = crypto.randomUUID();
@@ -126,11 +234,13 @@ export const correctTranscriptChunked = async (
   for (let i = 0; i < chunks.length; i++) {
     try {
       onProgress?.(i + 1, chunks.length);
-      const result = await correctTranscript(chunks[i], accessToken, i === 0 ? filename : null, {
+      const result = await correctWithFallback(chunks[i], accessToken, i === 0 ? filename : null, {
         skipSave: true,
         batchId,
         chunkIndex: i,
         chunkTotal: chunks.length,
+        signal: options?.signal,
+        model: options?.model,
       });
       results.push(result);
     } catch (err: any) {
@@ -154,5 +264,15 @@ export const correctTranscriptChunked = async (
     }
   }
 
-  return results.join('\n\n');
+  const finalResult = results.join('\n\n');
+
+  // 청크 방식으로 전체 교정이 성공적으로 끝난 경우에만 MyPage용으로 한 번 저장
+  try {
+    await saveFinalCorrectedDoc(draftText, finalResult, accessToken, filename ?? null);
+  } catch (e) {
+    // 저장 실패는 교정 결과 반환에는 영향 주지 않음 (콘솔에만 기록)
+    console.error('saveFinalCorrectedDoc error:', e);
+  }
+
+  return finalResult;
 };

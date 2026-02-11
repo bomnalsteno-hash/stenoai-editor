@@ -15,6 +15,14 @@ const SYSTEM_INSTRUCTION = `
   - 쉼표(,)가 들어갈 만한 호흡 지점
 - **한 줄은 최대 30자**를 넘지 않는다. (공백·문장부호·영어는 0.5자 취급)
 - 단, **30자 이내라면 한 호흡/의미 단위를 한 줄로 유지**하라. 너무 잘게 쪼개지 마라.
+- 다만, 문장 끝에 붙는 짧은 추임새는 다음과 같이 처리한다.
+  - 입력에서 '그렇죠.'처럼 **마침표로 끝나는 '그렇죠.'**는 보통 다른 사람이 리액션 하는 말이므로, 가능한 한 **다음 줄에 단독으로** 쓴다.
+    - 예: '바로바로 생성이 되네요. 그렇죠.' →
+      '바로바로 생성이 되네요
+      그렇죠'
+  - 입력에서 '그죠?' → '그렇죠?'처럼 **물음표로 끝나는 '그렇죠?'**는 같은 화자가 동의를 구하는 말일 때가 많으므로, **전체 길이가 30자 이내라면 앞 문장과 한 줄로 유지**한다.
+    - 예: '맞습니다 그렇죠?' →
+      '맞습니다, 그렇죠?'
 
 2) 문장 재구성 금지
 - **어순 변경, 문장 합치기, 요약, 문단 재구성 금지.**
@@ -22,7 +30,16 @@ const SYSTEM_INSTRUCTION = `
 - 예: 여러 줄로 나뉜 문장을 하나의 문장으로 다시 쓰거나, 설명을 정리해 주지 않는다.
 
 3) 따옴표 규칙
-- 책 제목, 프로그램명, 검색어, 인용·대사는 **작은따옴표 ' '만 사용**한다.
+- 작은따옴표 ' '는 **아래 경우에만** 사용한다.
+  - 유튜브·방송 채널명, 프로그램명 (예: '고은언니 한고은', '과학을 보다')
+  - 책·영화 제목 (예: '정의란 무엇인가', '사피엔스')
+  - 인용·대사 (예: 그러니까 제가 '야, 너 뭐하니?'라고 했거든요)
+- 그 외의 표현(별명, 수식어, 단순 평가 등)에는 **작은따옴표를 쓰지 않는다.**
+  - 예: 입력이 " '지식형 인간'이라는 말이 좋으십니까?"라면 →
+    "지식형 인간이라는 말이 좋으십니까?" (따옴표 제거)
+  - 예: " '운동 잘하는 방송인' 너무 좋죠" →
+    "운동 잘하는 방송인 너무 좋죠" (따옴표 제거)
+  - 예: 회사·서비스 이름(예: 퍼플렉시티)은 따옴표 없이 그대로 쓴다.
 - 큰따옴표 " "와 꺾쇠 < > 는 쓰지 말라.
 
 4) 마침표 규칙
@@ -31,6 +48,7 @@ const SYSTEM_INSTRUCTION = `
 
 5) 숫자·단위
 - 숫자는 **아라비아 숫자**로 적는다. (십년 → 10년, 오백명 → 500명)
+- 단, **'첫 번째, 두 번째, 열 번째, 열두 번째, 한 개, 두 개, 한두 개'처럼 수사(하나·둘·첫)를 쓰는 표현**은 숫자로 바꾸지 말고 **한글 그대로 유지**하라. (예: '열 번째' → O, '10번째' → X)
 
 6) 맥락 기반 오류만 수정
 - 발음이 비슷해 잘못 쓴 단어, 명백한 오타만 고친다.
@@ -82,10 +100,16 @@ const SYSTEM_INSTRUCTION = `
 우리 교실에서 의논하는 방법대로 했더니만요
 걔가 부끄러워하면서 도망갔어요'
 
-[예시 5] 30자 이내는 한 줄 + 그죠? → 그렇죠?
+[예시 5] '그죠?' → '그렇죠?' (같은 화자의 동의 질문은 한 줄)
 [Draft] 많은 예술은 다 모티프를 자연에서 찾습니다 그죠?
 [Final]
 많은 예술은 다 모티프를 자연에서 찾습니다, 그렇죠?
+
+[예시 6] 수사(첫 번째, 한두 개) 예외
+[Draft] 첫 번째 문제는 열 번째 줄에서 나옵니다 한두 개 정도는 괜찮습니다
+[Final]
+첫 번째 문제는 열 번째 줄에서 나옵니다
+한두 개 정도는 괜찮습니다
 
 # 3. 출력 형식
 
@@ -122,11 +146,63 @@ export default async function handler(req: any, res: any) {
   if (!userId) return res.status(401).json({ error: '유효하지 않은 세션입니다.' });
 
   const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
-  const text = body.text?.trim();
-  if (!text) return res.status(400).json({ error: '텍스트가 없습니다.' });
+  const mode = typeof body.mode === 'string' ? body.mode : 'correct';
   const headerFilename = req.headers?.['x-input-filename'];
   const bodyFilename = typeof body.filename === 'string' ? body.filename.trim() || null : null;
   const inputFilename = bodyFilename ?? (typeof headerFilename === 'string' ? headerFilename.trim() || null : null);
+
+  // 1) 최종 결과만 저장하는 전용 모드 (AI 호출 없이 DB에만 기록)
+  if (mode === 'save-only') {
+    const correctedText = typeof body.correctedText === 'string' ? body.correctedText.trim() : '';
+    const originalText = typeof body.originalText === 'string' ? body.originalText.trim() : null;
+    if (!correctedText) {
+      return res.status(400).json({ error: '저장할 결과 텍스트가 없습니다.' });
+    }
+
+    try {
+      const supabaseAdmin = createClient(
+        process.env.SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+      const docTitle =
+        (typeof inputFilename === 'string' && inputFilename.trim())
+          ? inputFilename.trim()
+          : new Date().toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'medium' });
+
+      const insertResult = await supabaseAdmin.from('corrected_docs').insert({
+        user_id: userId,
+        title: docTitle,
+        content: correctedText,
+        original_content: originalText,
+      });
+      if (insertResult.error) {
+        console.error('corrected_docs insert error (save-only):', insertResult.error);
+        return res.status(500).json({ error: '교정 결과 저장 중 오류가 발생했습니다.' });
+      }
+      return res.status(200).json({ ok: true });
+    } catch (err: any) {
+      console.error('save-only mode error:', err);
+      return res.status(500).json({ error: '교정 결과 저장 중 오류가 발생했습니다.' });
+    }
+  }
+
+  // 2) 기본 모드: AI 호출 + usage_logs/corrected_docs 기록
+  const text = body.text?.trim();
+  if (!text) return res.status(400).json({ error: '텍스트가 없습니다.' });
+
+  // 클라이언트에서 선택한 모델(있다면)을 적용. 허용 목록 밖의 값이면 기본값(Flash) 사용.
+  const requestedModel = typeof body.model === 'string' ? body.model : null;
+  const ALLOWED_MODELS = [
+    'gemini-3-flash-preview',
+    'gemini-3-pro-preview',
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-2.0-flash', // 이전 세대, 2026-03-31 종료 예정 (docs 기준)
+  ];
+  const model =
+    requestedModel && ALLOWED_MODELS.includes(requestedModel)
+      ? requestedModel
+      : 'gemini-3-flash-preview';
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return res.status(500).json({ error: '서버 설정 오류입니다.' });
@@ -134,7 +210,7 @@ export default async function handler(req: any, res: any) {
   try {
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model,
       contents: text,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -254,7 +330,8 @@ export default async function handler(req: any, res: any) {
       status === 503 ||
       /overload|503|UNAVAILABLE/i.test(msg) ||
       (typeof err?.response?.data === 'object' && err?.response?.data?.error?.status === 'UNAVAILABLE');
-    if (isOverloaded) {
+    const isNetworkError = /fetch failed|sending request/i.test(msg);
+    if (isOverloaded || isNetworkError) {
       return res.status(503).json({
         error: 'AI 서버가 일시적으로 바쁩니다. 잠시 후 다시 시도해주세요.',
       });

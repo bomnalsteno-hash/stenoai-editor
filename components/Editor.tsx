@@ -1,12 +1,37 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { correctTranscript, correctTranscriptChunked, CHUNK_SIZE } from '../services/geminiService';
 import { ArrowRight, Copy, Sparkles, CheckCheck, FileText, Eraser, Download, Upload } from 'lucide-react';
+
+const GEMINI_MODELS = [
+  {
+    id: 'gemini-3-flash-preview',
+    label: 'Gemini 3 Flash (최신 3세대 · 빠름 · 대량 처리용)',
+  },
+  {
+    id: 'gemini-3-pro-preview',
+    label: 'Gemini 3 Pro (최신 3세대 · 가장 꼼꼼한 교정/추론)',
+  },
+  {
+    id: 'gemini-2.5-flash',
+    label: 'Gemini 2.5 Flash (2세대 · 가격 대비 성능/안정성 균형)',
+  },
+  {
+    id: 'gemini-2.5-pro',
+    label: 'Gemini 2.5 Pro (2세대 · 깊은 추론용, 조금 더 느림)',
+  },
+  {
+    id: 'gemini-2.0-flash',
+    label: 'Gemini 2.0 Flash (이전 세대 · 2026-03 종료 예정)',
+  },
+] as const;
+type GeminiModelId = (typeof GEMINI_MODELS)[number]['id'];
 
 interface EditorProps {}
 
 export const Editor: React.FC<EditorProps> = () => {
   const { session } = useAuth();
+  const MAX_WAIT_SECONDS = 600;
   const [inputText, setInputText] = useState<string>('');
   const [outputText, setOutputText] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -16,10 +41,91 @@ export const Editor: React.FC<EditorProps> = () => {
   const [inputFileName, setInputFileName] = useState<string | null>(null);
   const [chunkProgress, setChunkProgress] = useState<{ current: number; total: number } | null>(null);
   const [remainingText, setRemainingText] = useState<string | null>(null);
+  const [autoMode, setAutoMode] = useState<boolean>(false);
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
+  const [model, setModel] = useState<GeminiModelId>('gemini-2.5-pro');
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
   inputFileNameRef.current = inputFileName;
+
+  const remainingTextRef = useRef<string | null>(null);
+  remainingTextRef.current = remainingText;
+
+  const autoModeRef = useRef<boolean>(false);
+  autoModeRef.current = autoMode;
+
+  const autoAttemptRef = useRef<number>(0);
+  const MAX_AUTO_ATTEMPTS = 10;
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // 교정 경과 시간(초) 표시
+  useEffect(() => {
+    if (!isProcessing) return;
+    setElapsedSec(0);
+    const id = window.setInterval(() => {
+      setElapsedSec((prev) => Math.min(MAX_WAIT_SECONDS, prev + 1));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [isProcessing]);
+
+  const percent =
+    chunkProgress && chunkProgress.total > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round(((Math.max(0, chunkProgress.current - 1) / chunkProgress.total) * 100))
+          )
+        )
+      : null;
+
+  // 브라우저 알림 권한 요청 (최초 1회, 가능할 때만)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => undefined);
+    }
+  }, []);
+
+  // 선택한 모델을 로컬 스토리지에서 복원
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem('stenoai_gemini_model');
+      if (stored && (GEMINI_MODELS as readonly { id: string; label: string }[]).some((m) => m.id === stored)) {
+        setModel(stored as GeminiModelId);
+      }
+    } catch {
+      // 스토리지 접근 실패 시 무시
+    }
+  }, []);
+
+  const handleModelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value as GeminiModelId;
+    setModel(value);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem('stenoai_gemini_model', value);
+      } catch {
+        // 스토리지 실패는 조용히 무시
+      }
+    }
+  }, []);
+
+  const notifyWhenHidden = useCallback((title: string, body: string) => {
+    if (typeof window === 'undefined') return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    if (document.visibilityState === 'visible') return;
+    try {
+      new Notification(title, { body });
+    } catch {
+      // 일부 브라우저에서 예외가 날 수 있으므로 조용히 무시
+    }
+  }, []);
 
   const handleDownload = useCallback(() => {
     if (!outputText) return;
@@ -66,6 +172,11 @@ export const Editor: React.FC<EditorProps> = () => {
     const baseText = (remainingText ?? inputText).trim();
     if (!baseText) return;
 
+    // 이전 요청이 남아 있다면 정리
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsProcessing(true);
     setError(null);
     // 이어서 교정하는 경우에는 이미 나온 결과는 유지하고, 처음부터 시작할 때만 초기화
@@ -83,9 +194,10 @@ export const Editor: React.FC<EditorProps> = () => {
             baseText,
             session.access_token,
             filenameToSend,
-            (current, total) => setChunkProgress({ current, total })
+            (current, total) => setChunkProgress({ current, total }),
+            { signal: controller.signal, model }
           )
-        : await correctTranscript(inputText, session.access_token, filenameToSend);
+        : await correctTranscript(baseText, session.access_token, filenameToSend, { signal: controller.signal, model });
       // 모든 구간이 성공적으로 끝난 경우: 이어서 모드였다면 기존 결과 뒤에 붙이고, 아니면 전체 교정 결과로 사용
       if (remainingText && outputText) {
         const sep = outputText.endsWith('\n') || result.startsWith('\n') ? '' : '\n\n';
@@ -95,6 +207,10 @@ export const Editor: React.FC<EditorProps> = () => {
       }
       setRemainingText(null);
     } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        // 사용자 취소 또는 외부 abort의 경우에는 조용히 무시
+        return;
+      }
       if (err?.partialResult) {
         // 청크 모드에서 일부 구간까지만 성공한 경우, 해당 부분이라도 결과 영역에 이어서 표시
         setOutputText((prev) => {
@@ -110,8 +226,76 @@ export const Editor: React.FC<EditorProps> = () => {
     } finally {
       setIsProcessing(false);
       setChunkProgress(null);
+      abortControllerRef.current = null;
     }
-  }, [inputText, remainingText, session?.access_token, inputFileName, outputText]);
+  }, [inputText, remainingText, session?.access_token, inputFileName, outputText, model]);
+
+  const handleStartAuto = useCallback(async () => {
+    if (isProcessing || autoMode) return;
+    const baseText = (remainingText ?? inputText).trim();
+    if (!baseText) return;
+    setAutoMode(true);
+    autoAttemptRef.current = 0;
+    setError(null);
+    await handleCorrect();
+  }, [autoMode, handleCorrect, inputText, isProcessing, remainingText]);
+
+  const handleStopAuto = useCallback(() => {
+    setAutoMode(false);
+    autoAttemptRef.current = 0;
+    // 현재 진행 중인 요청이 있다면 취소
+    abortControllerRef.current?.abort();
+  }, []);
+
+  // 자동 모드일 때, 실패하거나 일부만 교정된 경우 남은 텍스트가 있으면 알아서 다음 턴을 이어서 실행
+  useEffect(() => {
+    if (!autoModeRef.current) return;
+    if (isProcessing) return;
+    // 자동 재시도는 remainingText(아직 못 끝낸 부분)가 있을 때만 수행한다.
+    const baseText = (remainingTextRef.current ?? '').trim();
+    const hasRemaining = !!baseText;
+
+    if (!autoModeRef.current) return;
+
+    // 남은 텍스트가 없으면 자동 모드 종료
+    if (!hasRemaining) {
+      setAutoMode(false);
+      autoAttemptRef.current = 0;
+      return;
+    }
+
+    // 재시도 한도 초과 시 자동 모드 종료
+    if (autoAttemptRef.current >= MAX_AUTO_ATTEMPTS) {
+      setAutoMode(false);
+      autoAttemptRef.current = 0;
+      return;
+    }
+
+    // 다음 턴을 살짝 텀을 두고 자동 실행 (부분 성공이든 전체 실패든 남은 텍스트가 있으면 재시도)
+    const id = window.setTimeout(() => {
+      if (!autoModeRef.current) return;
+      autoAttemptRef.current += 1;
+      setError(null);
+      handleCorrect();
+    }, 2000);
+
+    return () => window.clearTimeout(id);
+  }, [handleCorrect, inputText, isProcessing]);
+
+  // 한 턴이 끝날 때(처리 중 -> 대기 상태로 바뀔 때) 백그라운드 탭이라면 브라우저 알림
+  const prevProcessingRef = useRef<boolean>(false);
+  useEffect(() => {
+    const wasProcessing = prevProcessingRef.current;
+    prevProcessingRef.current = isProcessing;
+    if (wasProcessing && !isProcessing) {
+      // 턴 종료 시점
+      if (!remainingTextRef.current) {
+        notifyWhenHidden('StenoAI 교정 완료', '교정이 완료되었습니다. 결과를 확인해 주세요.');
+      } else if (!autoModeRef.current) {
+        notifyWhenHidden('StenoAI 일부 교정 완료', '일부 구간까지만 교정되었습니다. 이어서 교정하기를 눌러주세요.');
+      }
+    }
+  }, [isProcessing, notifyWhenHidden]);
 
   const handleCopy = useCallback(() => {
     if (!outputText) return;
@@ -134,7 +318,7 @@ export const Editor: React.FC<EditorProps> = () => {
     <main className="flex-1 flex flex-col min-h-0 relative">
       {/* Toolbar / Action Bar */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0 z-10">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-6">
           <button
             onClick={handleClear}
             disabled={!inputText && !outputText}
@@ -143,6 +327,20 @@ export const Editor: React.FC<EditorProps> = () => {
             <Eraser size={16} />
             <span>초기화</span>
           </button>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span className="font-medium">AI 모델</span>
+            <select
+              value={model}
+              onChange={handleModelChange}
+              className="border border-slate-200 rounded-md px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
+            >
+              {GEMINI_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -153,7 +351,7 @@ export const Editor: React.FC<EditorProps> = () => {
           )}
           <button
             onClick={handleCorrect}
-            disabled={isProcessing || !inputText.trim()}
+            disabled={isProcessing || !inputText.trim() || autoMode}
             className={`
               flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold text-white shadow-md transition-all
               ${isProcessing 
@@ -177,6 +375,20 @@ export const Editor: React.FC<EditorProps> = () => {
                 <span>{remainingText ? '이어서 교정하기' : 'AI 교정 시작'}</span>
               </>
             )}
+          </button>
+          <button
+            onClick={autoMode ? handleStopAuto : handleStartAuto}
+            disabled={(!autoMode && isProcessing) || !inputText.trim()}
+            className={`
+              flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer disabled:cursor-not-allowed
+              ${
+                autoMode
+                  ? 'border-rose-300 text-rose-600 bg-rose-50 hover:bg-rose-100'
+                  : 'border-indigo-200 text-indigo-600 bg-white hover:bg-indigo-50'
+              }
+            `}
+          >
+            {autoMode ? '자동 교정 중지' : '끝까지 자동 교정'}
           </button>
         </div>
       </div>
@@ -203,7 +415,7 @@ export const Editor: React.FC<EditorProps> = () => {
               ref={textareaRef}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="여기에 음성 인식(STT) 초안 텍스트를 붙여넣거나, TXT 파일을 드래그 앤 드롭하세요..."
+              placeholder="여기에 음성 인식(STT) 초안 텍스트를 붙여넣거나, TXT 파일을 드래그 앤 드롭하세요. (줄바꿈을 하지 않은 원본 텍스트를 넣어주세요.)"
               className="w-full h-full p-6 resize-none focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500/10 bg-white text-slate-700 leading-relaxed text-base font-sans rounded-lg"
               spellCheck={false}
             />
@@ -212,6 +424,7 @@ export const Editor: React.FC<EditorProps> = () => {
                 <div className="text-center">
                   <Upload className="w-12 h-12 mx-auto mb-2 opacity-20" />
                   <p className="text-sm">텍스트 입력·붙여넣기 또는 TXT 파일 드래그 앤 드롭</p>
+                  <p className="text-xs mt-1">줄바꿈을 하지 않은 원본 텍스트를 넣어주세요.</p>
                 </div>
               </div>
             )}
@@ -258,6 +471,22 @@ export const Editor: React.FC<EditorProps> = () => {
                 <p className="text-slate-400 text-xs mt-2">
                   {chunkProgress ? `${chunkProgress.current}/${chunkProgress.total} 구간 교정 중` : '문맥 파악 및 오류 수정 중'}
                 </p>
+                <div className="mt-3 w-72 max-w-[80vw]">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <span>경과: {elapsedSec}s / {MAX_WAIT_SECONDS}s</span>
+                    <span>
+                      {chunkProgress ? `${Math.min(chunkProgress.current, chunkProgress.total)}/${chunkProgress.total}` : '진행 중'}
+                      {percent != null ? ` (${percent}%)` : ''}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-2 rounded-full bg-slate-200 overflow-hidden">
+                    {percent == null ? (
+                      <div className="h-full w-1/3 bg-indigo-300 animate-pulse" />
+                    ) : (
+                      <div className="h-full bg-indigo-500 transition-all" style={{ width: `${percent}%` }} />
+                    )}
+                  </div>
+                </div>
               </div>
             ) : null}
 
