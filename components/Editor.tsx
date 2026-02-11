@@ -201,7 +201,8 @@ export const Editor: React.FC<EditorProps> = () => {
   useEffect(() => {
     if (!autoModeRef.current) return;
     if (isProcessing) return;
-    const baseText = (remainingTextRef.current ?? inputText).trim();
+    // 자동 재시도는 remainingText(아직 못 끝낸 부분)가 있을 때만 수행한다.
+    const baseText = (remainingTextRef.current ?? '').trim();
     const hasRemaining = !!baseText;
 
     if (!autoModeRef.current) return;
