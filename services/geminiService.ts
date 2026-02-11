@@ -83,6 +83,39 @@ export const correctTranscript = async (
   return run(false);
 };
 
+function isTimeoutError(err: any): boolean {
+  const msg = String(err?.message ?? '');
+  return /timeout/i.test(msg) || /timed out/i.test(msg);
+}
+
+async function correctWithFallback(
+  text: string,
+  accessToken: string,
+  filename: string | null | undefined,
+  options: { skipSave?: boolean; batchId?: string; chunkIndex?: number; chunkTotal?: number; signal?: AbortSignal },
+  depth: number = 0
+): Promise<string> {
+  const MAX_DEPTH = 2;
+  const MIN_LEN = 400;
+  try {
+    return await correctTranscript(text, accessToken, filename, options);
+  } catch (err: any) {
+    if (isTimeoutError(err) && depth < MAX_DEPTH && text.length > MIN_LEN) {
+      // 느린 청크: 더 작은 청크로 나눠 재시도
+      const smallerChunks = splitIntoChunks(text, Math.max(Math.floor(text.length / 2), MIN_LEN));
+      const parts: string[] = [];
+      for (let i = 0; i < smallerChunks.length; i++) {
+        const subText = smallerChunks[i];
+        // 하위 청크는 저장/배치 정보 없이 순수 토큰 사용만
+        const sub = await correctWithFallback(subText, accessToken, i === 0 ? filename : null, { signal: options.signal }, depth + 1);
+        parts.push(sub);
+      }
+      return parts.join('\n\n');
+    }
+    throw err;
+  }
+}
+
 /** maxLen 이내에서 줄바꿈·공백 등 자연스러운 끊김으로 잘라서 청크 배열 반환 */
 function splitIntoChunks(text: string, maxLen: number = CHUNK_SIZE): string[] {
   const trimmed = text.trim();
@@ -142,7 +175,7 @@ export const correctTranscriptChunked = async (
   for (let i = 0; i < chunks.length; i++) {
     try {
       onProgress?.(i + 1, chunks.length);
-      const result = await correctTranscript(chunks[i], accessToken, i === 0 ? filename : null, {
+      const result = await correctWithFallback(chunks[i], accessToken, i === 0 ? filename : null, {
         skipSave: true,
         batchId,
         chunkIndex: i,
