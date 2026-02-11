@@ -6,8 +6,9 @@ import { ArrowRight, Copy, Sparkles, CheckCheck, FileText, Eraser, Download, Upl
 const GEMINI_MODELS = [
   { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (빠름·기본)' },
   { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro (더 꼼꼼함)' },
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-  { id: 'gemini-2.0-pro', label: 'Gemini 2.0 Pro' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (구버전 · 곧 종료)' },
 ] as const;
 type GeminiModelId = (typeof GEMINI_MODELS)[number]['id'];
 

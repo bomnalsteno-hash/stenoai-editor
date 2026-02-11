@@ -192,7 +192,13 @@ export default async function handler(req: any, res: any) {
 
   // 클라이언트에서 선택한 모델(있다면)을 적용. 허용 목록 밖의 값이면 기본값(Flash) 사용.
   const requestedModel = typeof body.model === 'string' ? body.model : null;
-  const ALLOWED_MODELS = ['gemini-3-flash-preview', 'gemini-3-pro-preview', 'gemini-2.0-flash', 'gemini-2.0-pro'];
+  const ALLOWED_MODELS = [
+    'gemini-3-flash-preview',
+    'gemini-3-pro-preview',
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-2.0-flash', // 이전 세대, 2026-03-31 종료 예정 (docs 기준)
+  ];
   const model =
     requestedModel && ALLOWED_MODELS.includes(requestedModel)
       ? requestedModel
