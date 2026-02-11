@@ -190,13 +190,21 @@ export default async function handler(req: any, res: any) {
   const text = body.text?.trim();
   if (!text) return res.status(400).json({ error: '텍스트가 없습니다.' });
 
+  // 클라이언트에서 선택한 모델(있다면)을 적용. 허용 목록 밖의 값이면 기본값(Flash) 사용.
+  const requestedModel = typeof body.model === 'string' ? body.model : null;
+  const ALLOWED_MODELS = ['gemini-3-flash-preview', 'gemini-3-pro-preview', 'gemini-2.0-flash', 'gemini-2.0-pro'];
+  const model =
+    requestedModel && ALLOWED_MODELS.includes(requestedModel)
+      ? requestedModel
+      : 'gemini-3-flash-preview';
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return res.status(500).json({ error: '서버 설정 오류입니다.' });
 
   try {
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model,
       contents: text,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,

@@ -6,11 +6,21 @@ const CLIENT_TIMEOUT_MS = 600_000; // 600초
 /** 한 번에 API로 보낼 최대 글자 수. 이보다 길면 자동으로 잘라서 여러 번 요청 후 합침. (타임아웃 완화를 위해 1500) */
 export const CHUNK_SIZE = 1500;
 
+type CorrectOptions = {
+  skipSave?: boolean;
+  batchId?: string;
+  chunkIndex?: number;
+  chunkTotal?: number;
+  signal?: AbortSignal;
+  /** 사용할 Gemini 모델 ID (예: gemini-3-flash-preview, gemini-3-pro-preview). 지정하지 않으면 서버 기본값 사용 */
+  model?: string;
+};
+
 export const correctTranscript = async (
   draftText: string,
   accessToken: string,
   filename?: string | null,
-  options?: { skipSave?: boolean; batchId?: string; chunkIndex?: number; chunkTotal?: number; signal?: AbortSignal }
+  options?: CorrectOptions
 ): Promise<string> => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -50,7 +60,11 @@ export const correctTranscript = async (
       const res = await fetch(`${API_BASE}/api/correct`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ text: draftText, filename: filename ?? undefined }),
+        body: JSON.stringify({
+          text: draftText,
+          filename: filename ?? undefined,
+          model: options?.model,
+        }),
         signal: controller.signal,
       });
       const data = await res.json().catch(() => ({}));
@@ -131,7 +145,7 @@ async function correctWithFallback(
   text: string,
   accessToken: string,
   filename: string | null | undefined,
-  options: { skipSave?: boolean; batchId?: string; chunkIndex?: number; chunkTotal?: number; signal?: AbortSignal },
+  options: CorrectOptions,
   depth: number = 0
 ): Promise<string> {
   const MAX_DEPTH = 2;
@@ -145,8 +159,14 @@ async function correctWithFallback(
       const parts: string[] = [];
       for (let i = 0; i < smallerChunks.length; i++) {
         const subText = smallerChunks[i];
-        // 하위 청크는 저장/배치 정보 없이 순수 토큰 사용만
-        const sub = await correctWithFallback(subText, accessToken, i === 0 ? filename : null, { signal: options.signal }, depth + 1);
+        // 하위 청크는 저장/배치 정보 없이 순수 토큰 사용만 (모델과 signal만 전달)
+        const sub = await correctWithFallback(
+          subText,
+          accessToken,
+          i === 0 ? filename : null,
+          { signal: options.signal, model: options.model },
+          depth + 1
+        );
         parts.push(sub);
       }
       return parts.join('\n\n');
@@ -201,7 +221,7 @@ export const correctTranscriptChunked = async (
   accessToken: string,
   filename: string | null | undefined,
   onProgress?: (current: number, total: number) => void,
-  options?: { signal?: AbortSignal }
+  options?: { signal?: AbortSignal; model?: string }
 ): Promise<string> => {
   const chunks = splitIntoChunks(draftText, CHUNK_SIZE);
   if (chunks.length === 0) return '';
@@ -220,6 +240,7 @@ export const correctTranscriptChunked = async (
         chunkIndex: i,
         chunkTotal: chunks.length,
         signal: options?.signal,
+        model: options?.model,
       });
       results.push(result);
     } catch (err: any) {

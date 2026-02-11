@@ -3,6 +3,14 @@ import { useAuth } from '../context/AuthContext';
 import { correctTranscript, correctTranscriptChunked, CHUNK_SIZE } from '../services/geminiService';
 import { ArrowRight, Copy, Sparkles, CheckCheck, FileText, Eraser, Download, Upload } from 'lucide-react';
 
+const GEMINI_MODELS = [
+  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (빠름·기본)' },
+  { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro (더 꼼꼼함)' },
+  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+  { id: 'gemini-2.0-pro', label: 'Gemini 2.0 Pro' },
+] as const;
+type GeminiModelId = (typeof GEMINI_MODELS)[number]['id'];
+
 interface EditorProps {}
 
 export const Editor: React.FC<EditorProps> = () => {
@@ -19,6 +27,7 @@ export const Editor: React.FC<EditorProps> = () => {
   const [remainingText, setRemainingText] = useState<string | null>(null);
   const [autoMode, setAutoMode] = useState<boolean>(false);
   const [elapsedSec, setElapsedSec] = useState<number>(0);
+  const [model, setModel] = useState<GeminiModelId>('gemini-3-flash-preview');
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
@@ -62,6 +71,31 @@ export const Editor: React.FC<EditorProps> = () => {
     if (!('Notification' in window)) return;
     if (Notification.permission === 'default') {
       Notification.requestPermission().catch(() => undefined);
+    }
+  }, []);
+
+  // 선택한 모델을 로컬 스토리지에서 복원
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem('stenoai_gemini_model');
+      if (stored && (GEMINI_MODELS as readonly { id: string; label: string }[]).some((m) => m.id === stored)) {
+        setModel(stored as GeminiModelId);
+      }
+    } catch {
+      // 스토리지 접근 실패 시 무시
+    }
+  }, []);
+
+  const handleModelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value as GeminiModelId;
+    setModel(value);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem('stenoai_gemini_model', value);
+      } catch {
+        // 스토리지 실패는 조용히 무시
+      }
     }
   }, []);
 
@@ -145,9 +179,9 @@ export const Editor: React.FC<EditorProps> = () => {
             session.access_token,
             filenameToSend,
             (current, total) => setChunkProgress({ current, total }),
-            { signal: controller.signal }
+            { signal: controller.signal, model }
           )
-        : await correctTranscript(baseText, session.access_token, filenameToSend, { signal: controller.signal });
+        : await correctTranscript(baseText, session.access_token, filenameToSend, { signal: controller.signal, model });
       // 모든 구간이 성공적으로 끝난 경우: 이어서 모드였다면 기존 결과 뒤에 붙이고, 아니면 전체 교정 결과로 사용
       if (remainingText && outputText) {
         const sep = outputText.endsWith('\n') || result.startsWith('\n') ? '' : '\n\n';
@@ -178,7 +212,7 @@ export const Editor: React.FC<EditorProps> = () => {
       setChunkProgress(null);
       abortControllerRef.current = null;
     }
-  }, [inputText, remainingText, session?.access_token, inputFileName, outputText]);
+  }, [inputText, remainingText, session?.access_token, inputFileName, outputText, model]);
 
   const handleStartAuto = useCallback(async () => {
     if (isProcessing || autoMode) return;
@@ -268,7 +302,7 @@ export const Editor: React.FC<EditorProps> = () => {
     <main className="flex-1 flex flex-col min-h-0 relative">
       {/* Toolbar / Action Bar */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0 z-10">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-6">
           <button
             onClick={handleClear}
             disabled={!inputText && !outputText}
@@ -277,6 +311,20 @@ export const Editor: React.FC<EditorProps> = () => {
             <Eraser size={16} />
             <span>초기화</span>
           </button>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span className="font-medium">AI 모델</span>
+            <select
+              value={model}
+              onChange={handleModelChange}
+              className="border border-slate-200 rounded-md px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 focus:border-indigo-400"
+            >
+              {GEMINI_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
