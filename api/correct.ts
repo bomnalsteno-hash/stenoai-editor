@@ -316,7 +316,8 @@ export default async function handler(req: any, res: any) {
       status === 503 ||
       /overload|503|UNAVAILABLE/i.test(msg) ||
       (typeof err?.response?.data === 'object' && err?.response?.data?.error?.status === 'UNAVAILABLE');
-    if (isOverloaded) {
+    const isNetworkError = /fetch failed|sending request/i.test(msg);
+    if (isOverloaded || isNetworkError) {
       return res.status(503).json({
         error: 'AI 서버가 일시적으로 바쁩니다. 잠시 후 다시 시도해주세요.',
       });
