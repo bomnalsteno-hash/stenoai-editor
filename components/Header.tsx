@@ -18,10 +18,6 @@ export const Header: React.FC = () => {
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <span className="px-3 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-full border border-indigo-100 flex items-center gap-1">
-          <Wand2 size={12} />
-          Gemini Powered
-        </span>
         {user?.email && (
           <span className="text-sm text-slate-600 truncate max-w-[160px]" title={user.email}>
             {user.email}

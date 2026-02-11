@@ -4,11 +4,26 @@ import { correctTranscript, correctTranscriptChunked, CHUNK_SIZE } from '../serv
 import { ArrowRight, Copy, Sparkles, CheckCheck, FileText, Eraser, Download, Upload } from 'lucide-react';
 
 const GEMINI_MODELS = [
-  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (빠름·기본)' },
-  { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro (더 꼼꼼함)' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (구버전 · 곧 종료)' },
+  {
+    id: 'gemini-3-flash-preview',
+    label: 'Gemini 3 Flash (최신 3세대 · 빠름 · 대량 처리용)',
+  },
+  {
+    id: 'gemini-3-pro-preview',
+    label: 'Gemini 3 Pro (최신 3세대 · 가장 꼼꼼한 교정/추론)',
+  },
+  {
+    id: 'gemini-2.5-flash',
+    label: 'Gemini 2.5 Flash (2세대 · 가격 대비 성능/안정성 균형)',
+  },
+  {
+    id: 'gemini-2.5-pro',
+    label: 'Gemini 2.5 Pro (2세대 · 깊은 추론용, 조금 더 느림)',
+  },
+  {
+    id: 'gemini-2.0-flash',
+    label: 'Gemini 2.0 Flash (이전 세대 · 2026-03 종료 예정)',
+  },
 ] as const;
 type GeminiModelId = (typeof GEMINI_MODELS)[number]['id'];
 
@@ -28,7 +43,7 @@ export const Editor: React.FC<EditorProps> = () => {
   const [remainingText, setRemainingText] = useState<string | null>(null);
   const [autoMode, setAutoMode] = useState<boolean>(false);
   const [elapsedSec, setElapsedSec] = useState<number>(0);
-  const [model, setModel] = useState<GeminiModelId>('gemini-3-flash-preview');
+  const [model, setModel] = useState<GeminiModelId>('gemini-2.5-flash');
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
