@@ -60,6 +60,24 @@ export const Editor: React.FC<EditorProps> = () => {
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // 줄바꿈 제거 여부를 사용자에게 물어보고, 동의하면 줄바꿈을 공백 하나로 치환 + 여러 공백을 하나로 압축
+  const normalizeNewlinesIfConfirmed = useCallback((raw: string): string => {
+    if (!raw) return raw;
+    if (typeof window === 'undefined') return raw;
+    if (!/[\r\n]/.test(raw)) return raw;
+    const shouldStrip = window.confirm(
+      '줄바꿈을 삭제하시겠습니까?\n\n네를 선택하면 모든 줄바꿈이 삭제되고 공백 하나로 바뀝니다.'
+    );
+    if (!shouldStrip) return raw;
+
+    // 줄바꿈을 공백 하나로, 양옆의 공백 포함해서 정리
+    let text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    text = text.replace(/\s*[\n]+[\s]*/g, ' ');
+    // 공백이 두 개 이상인 경우 하나로 압축
+    text = text.replace(/ {2,}/g, ' ');
+    return text.trim();
+  }, []);
+
   // 교정 경과 시간(초) 표시
   useEffect(() => {
     if (!isProcessing) return;
@@ -138,23 +156,29 @@ export const Editor: React.FC<EditorProps> = () => {
     URL.revokeObjectURL(url);
   }, [outputText, inputFileName]);
 
-  const handleFileDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-    const name = file.name.toLowerCase();
-    if (!name.endsWith('.txt')) {
-      setError('TXT 파일만 넣을 수 있습니다.');
-      return;
-    }
-    setError(null);
-    inputFileNameRef.current = file.name;
-    setInputFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = () => setInputText(String(reader.result ?? ''));
-    reader.readAsText(file, 'UTF-8');
-  }, []);
+  const handleFileDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragOver(false);
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
+      const name = file.name.toLowerCase();
+      if (!name.endsWith('.txt')) {
+        setError('TXT 파일만 넣을 수 있습니다.');
+        return;
+      }
+      setError(null);
+      inputFileNameRef.current = file.name;
+      setInputFileName(file.name);
+      const reader = new FileReader();
+      reader.onload = () => {
+        const raw = String(reader.result ?? '');
+        setInputText(normalizeNewlinesIfConfirmed(raw));
+      };
+      reader.readAsText(file, 'UTF-8');
+    },
+    [normalizeNewlinesIfConfirmed]
+  );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -167,6 +191,28 @@ export const Editor: React.FC<EditorProps> = () => {
     e.stopPropagation();
     setDragOver(false);
   }, []);
+
+  // 붙여넣기 시 줄바꿈이 포함되어 있으면, 삭제 여부를 물어보고 동의 시 변환해서 삽입
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const pasted = e.clipboardData.getData('text');
+      if (!pasted) return;
+      if (!/[\r\n]/.test(pasted)) {
+        // 줄바꿈이 없으면 기본 동작 유지
+        return;
+      }
+
+      e.preventDefault();
+      const processed = normalizeNewlinesIfConfirmed(pasted);
+      const target = e.currentTarget;
+      const start = target.selectionStart ?? 0;
+      const end = target.selectionEnd ?? 0;
+      const next =
+        inputText.slice(0, start) + processed + inputText.slice(end);
+      setInputText(next);
+    },
+    [inputText, normalizeNewlinesIfConfirmed]
+  );
 
   const handleCorrect = useCallback(async () => {
     const baseText = (remainingText ?? inputText).trim();
@@ -415,6 +461,7 @@ export const Editor: React.FC<EditorProps> = () => {
               ref={textareaRef}
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
+              onPaste={handlePaste}
               placeholder="여기에 음성 인식(STT) 초안 텍스트를 붙여넣거나, TXT 파일을 드래그 앤 드롭하세요. (줄바꿈을 하지 않은 원본 텍스트를 넣어주세요.)"
               className="w-full h-full p-6 resize-none focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500/10 bg-white text-slate-700 leading-relaxed text-base font-sans rounded-lg"
               spellCheck={false}
