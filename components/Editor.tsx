@@ -27,6 +27,15 @@ const GEMINI_MODELS = [
 ] as const;
 type GeminiModelId = (typeof GEMINI_MODELS)[number]['id'];
 
+/** 줄바꿈을 공백 하나로 치환하고, 연속 공백을 하나로 압축 (확인 없이 적용) */
+function stripNewlines(raw: string): string {
+  if (!raw) return raw;
+  let text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  text = text.replace(/\s*[\n]+[\s]*/g, ' ');
+  text = text.replace(/ {2,}/g, ' ');
+  return text.trim();
+}
+
 interface EditorProps {}
 
 export const Editor: React.FC<EditorProps> = () => {
@@ -44,6 +53,7 @@ export const Editor: React.FC<EditorProps> = () => {
   const [autoMode, setAutoMode] = useState<boolean>(false);
   const [elapsedSec, setElapsedSec] = useState<number>(0);
   const [model, setModel] = useState<GeminiModelId>('gemini-2.5-pro');
+  const [autoStripNewlines, setAutoStripNewlines] = useState<boolean>(true);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputFileNameRef = useRef<string | null>(null);
@@ -60,23 +70,29 @@ export const Editor: React.FC<EditorProps> = () => {
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // 줄바꿈 제거 여부를 사용자에게 물어보고, 동의하면 줄바꿈을 공백 하나로 치환 + 여러 공백을 하나로 압축
-  const normalizeNewlinesIfConfirmed = useCallback((raw: string): string => {
-    if (!raw) return raw;
-    if (typeof window === 'undefined') return raw;
-    if (!/[\r\n]/.test(raw)) return raw;
-    const shouldStrip = window.confirm(
-      '줄바꿈을 삭제하시겠습니까?\n\n네를 선택하면 모든 줄바꿈이 삭제되고 공백 하나로 바뀝니다.'
-    );
-    if (!shouldStrip) return raw;
+  // 붙여넣기/드롭 시: 자동 제거가 켜져 있으면 바로 적용, 꺼져 있으면 확인 후 적용
+  const normalizeNewlinesIfConfirmed = useCallback(
+    (raw: string): string => {
+      if (!raw) return raw;
+      if (typeof window === 'undefined') return raw;
+      if (!/[\r\n]/.test(raw)) return raw;
+      if (autoStripNewlines) return stripNewlines(raw);
+      const shouldStrip = window.confirm(
+        '줄바꿈을 삭제하시겠습니까?\n\n네를 선택하면 모든 줄바꿈이 삭제되고 공백 하나로 바뀝니다.'
+      );
+      if (!shouldStrip) return raw;
+      return stripNewlines(raw);
+    },
+    [autoStripNewlines]
+  );
 
-    // 줄바꿈을 공백 하나로, 양옆의 공백 포함해서 정리
-    let text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    text = text.replace(/\s*[\n]+[\s]*/g, ' ');
-    // 공백이 두 개 이상인 경우 하나로 압축
-    text = text.replace(/ {2,}/g, ' ');
-    return text.trim();
-  }, []);
+  // 현재 초안 텍스트에서 줄바꿈만 제거 (버튼 클릭용)
+  const handleStripNewlines = useCallback(() => {
+    const trimmed = inputText.trim();
+    if (!trimmed) return;
+    if (!/[\r\n]/.test(trimmed)) return;
+    setInputText(stripNewlines(trimmed));
+  }, [inputText]);
 
   // 교정 경과 시간(초) 표시
   useEffect(() => {
@@ -108,7 +124,7 @@ export const Editor: React.FC<EditorProps> = () => {
     }
   }, []);
 
-  // 선택한 모델을 로컬 스토리지에서 복원
+  // 선택한 모델·자동 줄바꿈 제거 옵션을 로컬 스토리지에서 복원
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -116,6 +132,8 @@ export const Editor: React.FC<EditorProps> = () => {
       if (stored && (GEMINI_MODELS as readonly { id: string; label: string }[]).some((m) => m.id === stored)) {
         setModel(stored as GeminiModelId);
       }
+      const autoStrip = window.localStorage.getItem('stenoai_auto_strip_newlines');
+      if (autoStrip !== null) setAutoStripNewlines(autoStrip === 'true');
     } catch {
       // 스토리지 접근 실패 시 무시
     }
@@ -127,6 +145,18 @@ export const Editor: React.FC<EditorProps> = () => {
     if (typeof window !== 'undefined') {
       try {
         window.localStorage.setItem('stenoai_gemini_model', value);
+      } catch {
+        // 스토리지 실패는 조용히 무시
+      }
+    }
+  }, []);
+
+  const handleAutoStripChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const checked = e.target.checked;
+    setAutoStripNewlines(checked);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem('stenoai_auto_strip_newlines', String(checked));
       } catch {
         // 스토리지 실패는 조용히 무시
       }
@@ -444,12 +474,31 @@ export const Editor: React.FC<EditorProps> = () => {
         
         {/* Input Panel */}
         <div className="flex-1 flex flex-col border-b md:border-b-0 md:border-r border-slate-200 min-h-[50%] md:min-h-0">
-          <div className="bg-slate-100 px-4 py-2 border-b border-slate-200 flex items-center justify-between">
+          <div className="bg-slate-100 px-4 py-2 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-slate-600 font-medium text-sm">
               <FileText size={14} />
               <span>STT 초안 (Draft)</span>
             </div>
-            <span className="text-xs text-slate-400">{inputText.length}자</span>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoStripNewlines}
+                  onChange={handleAutoStripChange}
+                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>붙여넣기·파일 넣을 때 줄바꿈 자동 제거</span>
+              </label>
+              <button
+                type="button"
+                onClick={handleStripNewlines}
+                disabled={!inputText.trim() || !/[\r\n]/.test(inputText)}
+                className="px-2.5 py-1 rounded text-xs font-medium border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                줄바꿈 없애기
+              </button>
+              <span className="text-xs text-slate-400">{inputText.length}자</span>
+            </div>
           </div>
           <div
             className={`flex-1 relative group border-2 border-dashed rounded-lg transition-colors ${dragOver ? 'border-indigo-400 bg-indigo-50/30' : 'border-transparent'}`}
